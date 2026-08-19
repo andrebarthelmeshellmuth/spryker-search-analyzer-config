@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+<transfers xmlns="spryker:transfer-01"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:schemaLocation="spryker:transfer-01 http://static.spryker.com/transfer-01.xsd">
+
+    <!-- One word/synonym/stopword/do-not-decompound entry. sortOrder is the persisted ordering; idSearchAnalyzerConfigTerm is null for a not-yet-persisted row (form submission). -->
+    <transfer name="SearchAnalyzerConfigTerm">
+        <property name="idSearchAnalyzerConfigTerm" type="int"/>
+        <property name="listType" type="string"/>
+        <property name="term" type="string"/>
+        <property name="sortOrder" type="int"/>
+    </transfer>
+
+    <transfer name="SearchAnalyzerConfigTermCollection">
+        <property name="searchAnalyzerConfigTerms" type="SearchAnalyzerConfigTerm[]" singular="searchAnalyzerConfigTerm"/>
+    </transfer>
+
+    <!--
+        The five independently-editable fields for one (sourceIdentifier, storeName) scope, plus the
+        term lists (grouped by listType) and the staged-vs-applied revision bookkeeping. This is both
+        the GUI edit form's backing transfer and the shape SearchAnalyzerConfigRenderer consumes to build
+        real OpenSearch/Elasticsearch analysis settings.
+    -->
+    <transfer name="SearchAnalyzerConfig">
+        <property name="idSearchAnalyzerConfig" type="int"/>
+        <property name="sourceIdentifier" type="string"/>
+        <property name="storeName" type="string"/>
+        <property name="stemmerLanguage" type="string"/>
+        <property name="normalizationFilter" type="string"/>
+        <property name="stopwordsMode" type="string"/>
+        <property name="stopwordsBuiltinLanguage" type="string"/>
+        <property name="decompoundEnabled" type="bool"/>
+        <property name="decompoundWords" type="SearchAnalyzerConfigTerm[]" singular="decompoundWord"/>
+        <property name="synonyms" type="SearchAnalyzerConfigTerm[]" singular="synonym"/>
+        <property name="stopwords" type="SearchAnalyzerConfigTerm[]" singular="stopword"/>
+        <property name="doNotDecompoundTerms" type="SearchAnalyzerConfigTerm[]" singular="doNotDecompoundTerm"/>
+        <property name="revision" type="int"/>
+        <property name="appliedRevision" type="int"/>
+        <property name="appliedIndexName" type="string"/>
+        <property name="appliedAt" type="string"/>
+    </transfer>
+
+    <transfer name="SearchAnalyzerConfigCollection">
+        <property name="searchAnalyzerConfigs" type="SearchAnalyzerConfig[]" singular="searchAnalyzerConfig"/>
+    </transfer>
+
+    <!-- One append-only history row: a full point-in-time snapshot (config fields + term lists), not a diff, so restore is a single read. -->
+    <transfer name="SearchAnalyzerConfigRevision">
+        <property name="idSearchAnalyzerConfigRevision" type="int"/>
+        <property name="revision" type="int"/>
+        <property name="changeSource" type="string"/>
+        <property name="searchAnalyzerConfig" type="SearchAnalyzerConfig" strict="true"/>
+        <property name="triggeredByUser" type="string"/>
+        <property name="createdAt" type="string"/>
+    </transfer>
+
+    <transfer name="SearchAnalyzerConfigRevisionCollection">
+        <property name="searchAnalyzerConfigRevisions" type="SearchAnalyzerConfigRevision[]" singular="searchAnalyzerConfigRevision"/>
+    </transfer>
+
+    <!-- Real OpenSearch/Elasticsearch analysis settings a SearchAnalyzerConfig renders to: the exact
+         "settings" fragment shape TargetIndexSettingsExpanderPluginInterface::expand() receives/returns,
+         and what SearchAnalyzerConfigPreviewer applies to a throwaway index for the diff/preview page. -->
+    <transfer name="SearchAnalyzerConfigAnalysisSettings">
+        <property name="settings" type="array" singular="setting"/>
+    </transfer>
+
+    <!-- One analyzer stage's token list for the preview page's before/after diff (e.g. "tokenizer", "decompound", "condition", "stemmer"). -->
+    <transfer name="SearchAnalyzerConfigPreviewStage">
+        <property name="stageName" type="string"/>
+        <property name="tokens" type="string[]" singular="token"/>
+    </transfer>
+
+    <transfer name="SearchAnalyzerConfigPreviewResult">
+        <property name="inputText" type="string"/>
+        <property name="beforeStages" type="SearchAnalyzerConfigPreviewStage[]" singular="beforeStage"/>
+        <property name="afterStages" type="SearchAnalyzerConfigPreviewStage[]" singular="afterStage"/>
+    </transfer>
+
+</transfers>

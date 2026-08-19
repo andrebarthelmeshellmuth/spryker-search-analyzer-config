@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+    <search-analyzer-config-gui>
+        <label>Search Analyzer Config</label>
+        <title>Search Analyzer Config</title>
+        <icon>tune</icon>
+        <bundle>search-analyzer-config</bundle>
+        <controller>index</controller>
+        <action>index</action>
+        <pages>
+            <search-analyzer-config-history>
+                <label>History</label>
+                <title>Revision History</title>
+                <bundle>search-analyzer-config</bundle>
+                <controller>history</controller>
+                <action>index</action>
+                <visible>0</visible>
+            </search-analyzer-config-history>
+            <search-analyzer-config-edit>
+                <label>Edit</label>
+                <title>Edit</title>
+                <bundle>search-analyzer-config</bundle>
+                <controller>config</controller>
+                <action>edit</action>
+                <visible>0</visible>
+            </search-analyzer-config-edit>
+            <search-analyzer-config-copy>
+                <label>Copy</label>
+                <title>Copy</title>
+                <bundle>search-analyzer-config</bundle>
+                <controller>config</controller>
+                <action>copy</action>
+                <visible>0</visible>
+            </search-analyzer-config-copy>
+            <search-analyzer-config-preview>
+                <label>Preview</label>
+                <title>Preview</title>
+                <bundle>search-analyzer-config</bundle>
+                <controller>preview</controller>
+                <action>index</action>
+                <visible>0</visible>
+            </search-analyzer-config-preview>
+        </pages>
+    </search-analyzer-config-gui>
+</config>

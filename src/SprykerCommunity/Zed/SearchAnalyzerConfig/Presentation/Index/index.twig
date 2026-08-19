@@ -1,0 +1,77 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'Search Analyzer Config' %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: scope ? scope.aliasName : 'Managed scopes' } %}
+        {% block widget_content %}
+            <p>Pick a source and a store to view and manage that scope's analyzer config.</p>
+            <p>
+                Saving a config only STAGES it in this package's own database -- it never touches a live
+                index by itself. Use "Apply" below to trigger a search-index-alias rebuild that actually
+                materializes the staged config into a fresh target index.
+            </p>
+            <div style="margin-bottom: 15px;">
+                <form method="get" class="form-inline">
+                    <label for="source">{{ 'Source' | trans }}</label>
+                    <select name="source" id="source" class="form-control" onchange="this.form.submit()">
+                        <option value="" {% if not selectedSource %}selected="selected"{% endif %}>{{ 'Select a source' | trans }}</option>
+                        {% for source in sources %}
+                            <option value="{{ source }}" {% if source == selectedSource %}selected="selected"{% endif %}>
+                                {{ source }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <label for="store" style="margin-left: 10px;">{{ 'Store' | trans }}</label>
+                    <select name="store" id="store" class="form-control" onchange="this.form.submit()">
+                        <option value="" {% if not selectedStore %}selected="selected"{% endif %}>{{ 'Select a store' | trans }}</option>
+                        {% for store in stores %}
+                            <option value="{{ store }}" {% if store == selectedStore %}selected="selected"{% endif %}>
+                                {{ store }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+
+            {% if not scope %}
+                <p>{{ 'Select a source and a store above to manage its config.' | trans }}</p>
+            {% else %}
+                <div style="margin-bottom: 20px;">
+                    <a href="{{ url('/search-analyzer-config/config/edit', { source: selectedSource, store: selectedStore }) }}" class="btn btn-outline-primary">{{ 'Edit' | trans }}</a>
+                    <a href="{{ url('/search-analyzer-config/config/copy', { source: selectedSource, store: selectedStore }) }}" class="btn btn-outline-secondary">{{ 'Copy to another scope' | trans }}</a>
+                    <a href="{{ url('/search-analyzer-config/preview/index', { source: selectedSource, store: selectedStore }) }}" class="btn btn-outline-secondary">{{ 'Preview' | trans }}</a>
+                    <a href="{{ url('/search-analyzer-config/history/index', { source: selectedSource, store: selectedStore }) }}" class="btn btn-outline-secondary">{{ 'History' | trans }}</a>
+                    {% if config %}
+                        {{ form_start(applyFormView, { action: url('/search-analyzer-config/index/apply'), method: 'POST', attr: { style: 'display:inline-block;' } }) }}
+                        {{ form_widget(applyFormView) }}
+                        <button type="submit" class="btn btn-success"
+                            onclick="return confirm('Trigger a search-index-alias rebuild for {{ selectedSource }}/{{ selectedStore }} now?');">{{ 'Apply (rebuild)' | trans }}</button>
+                        {{ form_end(applyFormView) }}
+                    {% endif %}
+                </div>
+
+                {% if not config %}
+                    <p>{{ 'No config staged for this scope yet.' | trans }} <a href="{{ url('/search-analyzer-config/config/edit', { source: selectedSource, store: selectedStore }) }}">{{ 'Create one' | trans }}</a>.</p>
+                {% else %}
+                    <table class="table">
+                        <tbody>
+                            <tr><th>{{ 'Revision' | trans }}</th><td>{{ config.revision }} {% if config.appliedRevision is not same as(config.revision) %}<span class="label label-warning">{{ 'not yet applied' | trans }}</span>{% else %}<span class="label label-success">{{ 'applied' | trans }}</span>{% endif %}</td></tr>
+                            <tr><th>{{ 'Stemmer language' | trans }}</th><td>{{ config.stemmerLanguage ?: '—' }}</td></tr>
+                            <tr><th>{{ 'Normalization filter' | trans }}</th><td>{{ config.normalizationFilter ?: '—' }}</td></tr>
+                            <tr><th>{{ 'Stopwords mode' | trans }}</th><td>{{ config.stopwordsMode }}{% if config.stopwordsMode == 'builtin' %} ({{ config.stopwordsBuiltinLanguage }}){% endif %}</td></tr>
+                            <tr><th>{{ 'Decompounding' | trans }}</th><td>{{ config.decompoundEnabled ? 'enabled' : 'disabled' }}</td></tr>
+                            <tr><th>{{ 'Decompound words' | trans }}</th><td>{{ config.decompoundWords | length }} {{ 'term(s)' | trans }}</td></tr>
+                            <tr><th>{{ 'Synonyms' | trans }}</th><td>{{ config.synonyms | length }} {{ 'rule(s)' | trans }}</td></tr>
+                            <tr><th>{{ 'Do-not-decompound / brand terms' | trans }}</th><td>{{ config.doNotDecompoundTerms | length }} {{ 'term(s)' | trans }}</td></tr>
+                            {% if config.appliedIndexName %}
+                                <tr><th>{{ 'Last applied' | trans }}</th><td>{{ config.appliedIndexName }} {{ 'at' | trans }} {{ config.appliedAt }}</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                {% endif %}
+            {% endif %}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}
