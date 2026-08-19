@@ -1,0 +1,45 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'Edit ' ~ sourceIdentifier ~ ' / ' ~ storeName %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
+        {% block widget_content %}
+            <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
+            <p>Saving only STAGES this config -- it does not touch a live index. Use "Apply" on the overview page afterward.</p>
+
+            {{ form_start(editFormView) }}
+                {{ form_widget(editFormView.sourceIdentifier) }}
+                {{ form_widget(editFormView.storeName) }}
+
+                <div class="row">
+                    <div class="col-md-6">{{ form_row(editFormView.stemmerLanguage) }}</div>
+                    <div class="col-md-6">{{ form_row(editFormView.normalizationFilter) }}</div>
+                </div>
+
+                <hr/>
+                <h4>{{ 'Stopwords' | trans }}</h4>
+                {{ form_row(editFormView.stopwordsMode) }}
+                {{ form_row(editFormView.stopwordsBuiltinLanguage) }}
+                {{ form_row(editFormView.stopwordsCustomText) }}
+
+                <hr/>
+                <h4>{{ 'Decompounding' | trans }}</h4>
+                {{ form_row(editFormView.decompoundEnabled) }}
+                {{ form_row(editFormView.decompoundWordsText) }}
+
+                <hr/>
+                <h4>{{ 'Do-not-decompound / brand list' | trans }}</h4>
+                <p class="text-muted">{{ 'Restricted to letters, digits, "_", "-", "." -- these are rendered into a script, not just a word list; anything else is rejected.' | trans }}</p>
+                {{ form_row(editFormView.doNotDecompoundTermsText) }}
+
+                <hr/>
+                <h4>{{ 'Synonyms' | trans }}</h4>
+                {{ form_row(editFormView.synonymsText) }}
+
+                <button type="submit" class="btn btn-primary">{{ 'Save' | trans }}</button>
+            {{ form_end(editFormView) }}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}

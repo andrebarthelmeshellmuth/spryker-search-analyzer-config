@@ -1,0 +1,47 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'History ' ~ sourceIdentifier ~ ' / ' ~ storeName %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
+        {% block widget_content %}
+            <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
+            <p>{{ 'Restoring re-saves an earlier revision as a brand-new revision -- an append, never a rewind. It does not apply anything on its own.' | trans }}</p>
+
+            {% if historyRows %}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>{{ 'Revision' | trans }}</th>
+                            <th>{{ 'Change source' | trans }}</th>
+                            <th>{{ 'Triggered by' | trans }}</th>
+                            <th>{{ 'When' | trans }}</th>
+                            <th>{{ 'Actions' | trans }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in historyRows %}
+                            {% set revision = row.revision %}
+                            <tr>
+                                <td>{{ revision.revision }}</td>
+                                <td>{{ revision.changeSource }}</td>
+                                <td>{{ revision.triggeredByUser ?: '—' }}</td>
+                                <td>{{ revision.createdAt ?: '—' }}</td>
+                                <td>
+                                    {{ form_start(row.restoreFormView, { action: url('/search-analyzer-config/history/restore'), method: 'POST' }) }}
+                                    {{ form_widget(row.restoreFormView) }}
+                                    <button type="submit" class="btn btn-xs btn-outline-warning"
+                                        onclick="return confirm('Restore revision {{ revision.revision }} as a new revision?');">{{ 'Restore' | trans }}</button>
+                                    {{ form_end(row.restoreFormView) }}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>{{ 'No revision history for this scope yet.' | trans }}</p>
+            {% endif %}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}
