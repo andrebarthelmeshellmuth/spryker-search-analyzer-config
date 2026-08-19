@@ -15,6 +15,7 @@
 - [Managing config without a GUI](#managing-config-without-a-gui)
 - [Supported languages](#supported-languages)
 - [Limitations](#limitations)
+- [Demo fixture](#demo-fixture-for-testing-against-a-real-b2b-demo-marketplace-checkout)
 - [Testing and CI](#testing-and-ci)
 - [License](#license)
 
@@ -193,8 +194,14 @@ Under **Search Toolbox → Search Analyzer Config** in the back office:
   other action: Edit,
   Copy to another scope, Preview, History, and Apply (the explicit rebuild trigger — see [How it
   works](#how-it-works)'s two-step Apply design).
+
+  ![The Overview page for the "page" source / DE store scope: revision 10, not yet applied, and every staged field — stemmer language, decompound word list, synonyms, and the do-not-decompound/brand list](docs/screenshots/overview-page.png)
+
 - **Edit** — the five fields plus the four term lists (one term per line). Saving only stages the config;
   it never touches a live index.
+
+  ![The Edit page: stemmer language and normalization filter dropdowns, stopwords mode, the decompounding toggle and word list, the do-not-decompound/brand list, and Solr-style synonym rules](docs/screenshots/edit-page.png)
+
 - **Copy** — a confirm screen naming the target scope before overwriting it; see
   [`SearchAnalyzerConfigCopier`](#data-model)'s hard-override semantics.
 - **Preview** — pick a target analyzer and enter a sample search string; see a stage-by-stage token
@@ -202,8 +209,13 @@ Under **Search Toolbox → Search Analyzer Config** in the back office:
   created and deleted within the same request, the staged config applied. This is the tool that would have
   caught this package's own origin bug live (`Brennenstuhl` → `stuhl` → `sessel`) before it ever reached a
   real rebuild.
+
+  ![The Preview page comparing "Before (live)" and "After (staged config)" for the sample text "Feldwerk Bürostuhl Brennenstuhl": both sides protect "brennenstuhl" from the decompounder, and the "After" side shows a newly staged "bürostuhl → drehstuhl" synonym rule that hasn't been applied to a live index yet](docs/screenshots/preview-page.png)
+
 - **History** — every revision for a scope (newest first), with a one-click Restore that re-saves an
   earlier revision's full snapshot as a brand-new revision — an append, never a rewind.
+
+  ![The History page: every past revision for a scope with its change source (manual/copy/restore), who triggered it, and a one-click Restore action](docs/screenshots/history-page.png)
 
 ## Configuration
 
@@ -398,6 +410,39 @@ by your cluster fails the rebuild, not silently).
   the filter chain's token output, not full-document relevance scoring.
 - No GUI Presentation (browser-automation) test suite yet for the new pages — verified manually in a real
   browser session instead; see [Testing and CI](#testing-and-ci).
+
+## Demo fixture (for testing against a real b2b-demo-marketplace checkout)
+
+This package's own README screenshots (see [The Zed GUI](#the-zed-gui)) use "Feldwerk", a small fictional
+demo catalog (12 products — 10 chairs, a hand trolley, a paper shredder — own SVG images, own DE pricing)
+shared with the sibling `spryker-community/search-*` packages, instead of this demoshop's real, licensed
+supplier catalog (real brand photography/copy that can't be redistributed publicly — see
+["Not an official Spryker project"](#what-does-this-do) and this repo's own licensing notes). Unlike its
+siblings, this package ships no Yves widget and no permission-gated feature, so there is no test-customer
+fixture here — just the catalog:
+
+```bash
+php fixtures/apply.php /path/to/b2b-demo-marketplace
+```
+
+Idempotent (safe to re-run) and edits the target CSVs by header name, not line position. Then, from the
+demoshop root:
+
+```bash
+./docker/sdk console data:import product-abstract
+./docker/sdk console data:import product-abstract-store
+./docker/sdk console data:import product-approval-status
+./docker/sdk console data:import product-concrete
+./docker/sdk console data:import product-stock
+./docker/sdk console data:import product-image
+./docker/sdk console data:import product-price
+./docker/sdk console publish:trigger-events -r product_abstract
+./docker/sdk console queue:worker:start --stop-when-empty
+```
+
+If you're adding a NEW fixture claim (a different product, attribute key, or filter slot value) for this
+or another package in this toolkit, check/update `FIXTURE_CLAIMS.md` in the `spryker-community/search-toolkit`
+repo first — see that file for why silent collisions between packages' own fixtures are a real risk.
 
 ## Testing and CI
 
