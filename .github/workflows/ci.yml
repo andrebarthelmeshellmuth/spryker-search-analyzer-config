@@ -222,7 +222,14 @@ jobs:
 
       - name: Propel model build
         working-directory: shop
-        run: vendor/bin/console propel:model:build
+        # Pure schema-file codegen (aggregates every installed package's own schema.xml, then parses it
+        # into Orm\Zed\*\Persistence PHP classes) -- phpstan/Codeception only need those CLASSES to exist,
+        # not a real database. Missing propel:schema:copy fails propel:model:build with "src/Orm/Propel/
+        # Schema directory does not exist" -- confirmed live, matches this package's own sibling
+        # (search-index-alias) which already has this step.
+        run: |
+          vendor/bin/console propel:schema:copy
+          vendor/bin/console propel:model:build
 
       - name: phpstan
         working-directory: shop
