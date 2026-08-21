@@ -278,6 +278,26 @@ class SearchAnalyzerConfigFacade extends AbstractFacade implements SearchAnalyze
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * @api
+     *
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string>
+     */
+    public function collectMissingSlotWarnings(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer): array
+    {
+        return $this->getFactory()
+            ->createSearchAnalyzerConfigPreviewer()
+            ->collectMissingSlotWarnings(
+                $searchAnalyzerConfigTransfer->getSourceIdentifierOrFail(),
+                $searchAnalyzerConfigTransfer->getStoreNameOrFail(),
+                $searchAnalyzerConfigTransfer,
+            );
+    }
+
+    /**
      * @param string $sourceIdentifier
      * @param string $storeName
      * @param int $revision

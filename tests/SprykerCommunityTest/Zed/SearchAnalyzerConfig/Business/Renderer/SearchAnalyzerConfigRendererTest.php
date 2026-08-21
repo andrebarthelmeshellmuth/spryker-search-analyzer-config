@@ -122,7 +122,13 @@ class SearchAnalyzerConfigRendererTest extends Unit
         );
     }
 
-    public function testActiveStemmerLanguageWithoutAReferencedSlotThrowsMissingFilterSlotException(): void
+    /**
+     * A missing slot on an analyzer that DOES exist is a deliberate per-analyzer opt-out now, not an
+     * error -- render() simply skips that field for that analyzer. See
+     * testActiveStemmerLanguageWithoutAReferencedSlotWarnsButDoesNotThrow() for the same case surfaced as
+     * a non-fatal warning via collectMissingSlotWarnings().
+     */
+    public function testActiveStemmerLanguageWithoutAReferencedSlotIsSkippedWithoutThrowing(): void
     {
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setStemmerLanguage('light_german');
@@ -138,12 +144,36 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ],
         ];
 
-        $this->expectException(SearchAnalyzerConfigMissingFilterSlotException::class);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
 
-        (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $this->assertArrayNotHasKey('sac_stemmer', $result['analysis']['filter'] ?? []);
     }
 
-    public function testMissingFilterSlotExceptionCollectsAMessagePerAffectedField(): void
+    public function testActiveStemmerLanguageWithoutAReferencedSlotWarnsButDoesNotThrow(): void
+    {
+        $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
+            ->setStemmerLanguage('light_german');
+
+        $baseSettings = [
+            'analysis' => [
+                'analyzer' => [
+                    'fulltext_search_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase'],
+                    ],
+                ],
+            ],
+        ];
+
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('sac_stemmer', $warnings[0]);
+        // Must not have mutated the caller's settings.
+        $this->assertArrayNotHasKey('filter', $baseSettings['analysis']);
+    }
+
+    public function testCollectMissingSlotWarningsCollectsOneMessagePerAffectedField(): void
     {
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setStemmerLanguage('light_german')
@@ -160,12 +190,25 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ],
         ];
 
-        try {
-            (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
-            $this->fail('Expected SearchAnalyzerConfigMissingFilterSlotException.');
-        } catch (SearchAnalyzerConfigMissingFilterSlotException $searchAnalyzerConfigMissingFilterSlotException) {
-            $this->assertCount(2, $searchAnalyzerConfigMissingFilterSlotException->getMissingSlotMessages());
-        }
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+
+        $this->assertCount(2, $warnings);
+    }
+
+    /**
+     * Same "analyzer absent from settings entirely" case as testAnalyzerNameNotPresentInBaseSettingsThrowsWhenAFieldIsActive(),
+     * but via collectMissingSlotWarnings() -- still surfaced (as a warning, not a throw) so a caller using
+     * only the warnings method still learns about a real typo/config bug, not just per-slot opt-outs.
+     */
+    public function testCollectMissingSlotWarningsAlsoReportsAnAnalyzerAbsentFromSettingsEntirely(): void
+    {
+        $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
+            ->setStemmerLanguage('light_german');
+
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, [], ['nonexistent_analyzer']);
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('nonexistent_analyzer', $warnings[0]);
     }
 
     public function testInactiveFieldWithNoReferencedSlotDoesNotThrowAndWritesNothing(): void
@@ -307,7 +350,42 @@ class SearchAnalyzerConfigRendererTest extends Unit
         );
     }
 
-    public function testActiveDecompoundWithoutAReferencedSlotThrowsMissingFilterSlotException(): void
+    /**
+     * The exact case this relaxation is FOR: a project wires decompounding into some target analyzers and
+     * deliberately leaves it out of others (e.g. an index-time analyzer gets it, a search-time one
+     * doesn't) -- the analyzer without the slot just doesn't get decompounding, no throw, no error.
+     */
+    public function testActiveDecompoundWithoutAReferencedSlotOnOneAnalyzerIsSkippedThereButStillAppliedOnAnother(): void
+    {
+        $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
+            ->setDecompoundEnabled(true)
+            ->setDecompoundWords(new ArrayObject([$this->term('brenn')]));
+
+        $baseSettings = [
+            'analysis' => [
+                'analyzer' => [
+                    'fulltext_search_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase'],
+                    ],
+                    'fulltext_index_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase', 'sac_decompound'],
+                    ],
+                ],
+            ],
+        ];
+
+        $result = (new SearchAnalyzerConfigRenderer())->render(
+            $searchAnalyzerConfigTransfer,
+            $baseSettings,
+            ['fulltext_search_analyzer', 'fulltext_index_analyzer'],
+        );
+
+        $this->assertArrayHasKey('sac_decompound', $result['analysis']['filter']);
+    }
+
+    public function testActiveDecompoundWithoutAReferencedSlotWarnsButDoesNotThrow(): void
     {
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setDecompoundEnabled(true)
@@ -324,9 +402,12 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ],
         ];
 
-        $this->expectException(SearchAnalyzerConfigMissingFilterSlotException::class);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $this->assertArrayNotHasKey('sac_decompound', $result['analysis']['filter'] ?? []);
 
-        (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('sac_decompound', $warnings[0]);
     }
 
     public function testKeywordMarkerRequiresBothADoNotDecompoundListAndAStemmerLanguage(): void

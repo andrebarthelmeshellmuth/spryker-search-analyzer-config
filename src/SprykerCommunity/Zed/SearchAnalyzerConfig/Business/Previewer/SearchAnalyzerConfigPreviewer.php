@@ -126,16 +126,15 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
     }
 
     /**
-     * Two layers, cheapest/most-precise first:
-     * 1. A pure structural check (no cluster write) -- SearchAnalyzerConfigRenderer itself throws
-     *    SearchAnalyzerConfigMissingFilterSlotException when a field has an active value but its slot
-     *    isn't referenced by a target analyzer's own chain (see that class's own doc block for why this
-     *    package never adds the slot itself). This alone catches the common case with an exact,
-     *    actionable message.
-     * 2. A real create-and-delete probe against the live cluster (only reached once the structural check
-     *    passes AND the render actually changes anything) -- the backstop for anything the structural
-     *    check can't know about, e.g. a stemmer language value or synonym rule OpenSearch itself rejects
-     *    for a reason unrelated to which slots exist.
+     * The one remaining HARD gate before persisting: a real create-and-delete probe against the live
+     * cluster (only reached once the render actually changes anything) -- catches anything a per-slot
+     * check can't know about, e.g. a stemmer language value or synonym rule OpenSearch itself rejects, or
+     * a chain-order mistake that makes index creation fail outright. A target analyzer name that isn't
+     * declared in the live settings AT ALL still throws SearchAnalyzerConfigMissingFilterSlotException here
+     * too (a real typo/config bug, not a per-slot opt-out) -- see SearchAnalyzerConfigRenderer's own class
+     * doc block. A field with an active value whose slot simply isn't referenced by one target analyzer is
+     * NOT checked here anymore -- that's collectMissingSlotWarnings()'s job, a non-fatal, pre-save warning
+     * the caller can let the user confirm past.
      *
      * @param string $sourceIdentifier
      * @param string $storeName
@@ -189,6 +188,46 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         }
 
         return $this->probeSettingsAgainstLiveCluster($elasticaClient, $aliasName, $afterSettings);
+    }
+
+    /**
+     * Pre-save, non-fatal counterpart to validateAgainstLiveCluster()'s remaining hard checks -- read-only
+     * (no probe index, no persistence), so it's cheap enough to call on every form submit before the user
+     * has confirmed anything. Resolves the same live settings validateAgainstLiveCluster() would, then
+     * defers the actual per-slot detection to SearchAnalyzerConfigRenderer::collectMissingSlotWarnings().
+     * Fails open (empty warnings) for an unmanaged scope or a cluster hiccup, exactly like
+     * validateAgainstLiveCluster() does -- a warning check has no business blocking a save over either.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string>
+     */
+    public function collectMissingSlotWarnings(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array {
+        $targetAnalyzerNames = $this->config->getTargetAnalyzerNames();
+
+        if ($targetAnalyzerNames === []) {
+            return [];
+        }
+
+        try {
+            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
+        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+            return [];
+        }
+
+        try {
+            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
+        } catch (ElasticaExceptionInterface) {
+            return [];
+        }
+
+        return $this->renderer->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, $targetAnalyzerNames);
     }
 
     /**

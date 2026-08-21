@@ -27,16 +27,18 @@ use SprykerCommunity\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use stdClass;
 
 /**
- * INTEGRATION TEST — real OpenSearch/Elasticsearch cluster, never mocked: proves BOTH layers documented in
- * `SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()`'s own doc block. This package never adds a
- * filter to an analyzer's own chain or reorders it (see SearchAnalyzerConfigRenderer's class doc block), so
- * the fixture index below pre-declares the `sac_synonyms`/`sac_stemmer` slots itself, exactly the way a real
- * project schema would. The cheap structural check catches a scope with an active value whose slot was never
- * declared/chained at all; the expensive create-and-delete live-cluster probe is the backstop for a slot
- * that IS chained and correctly positioned, but whose DATA OpenSearch itself rejects (an unrecognized
- * stemmer language, here -- verified live). A slot the PROJECT positioned badly (e.g. a synonym filter after
- * its own n-gram filter) can't be exercised this way at all: OpenSearch refuses to even CREATE an index
- * with that combination, structural content aside -- i.e. that mistake already breaks the project's next
+ * INTEGRATION TEST — real OpenSearch/Elasticsearch cluster, never mocked: proves both methods documented on
+ * `SearchAnalyzerConfigPreviewer`. This package never adds a filter to an analyzer's own chain or reorders
+ * it (see SearchAnalyzerConfigRenderer's class doc block), so the fixture index below pre-declares the
+ * `sac_synonyms`/`sac_stemmer` slots itself, exactly the way a real project schema would. A slot never
+ * referenced by the target analyzer is a deliberate per-analyzer opt-out now, not a save-blocking error --
+ * `collectMissingSlotWarnings()` is the cheap, read-only, non-fatal check for that case, meant for a caller
+ * that wants to warn the user and let them confirm past it; `validateAgainstLiveCluster()` no longer blocks
+ * on it at all, only on the expensive create-and-delete live-cluster probe (the backstop for a slot that IS
+ * chained and correctly positioned, but whose DATA OpenSearch itself rejects -- an unrecognized stemmer
+ * language, here -- verified live). A slot the PROJECT positioned badly (e.g. a synonym filter after its
+ * own n-gram filter) can't be exercised this way at all: OpenSearch refuses to even CREATE an index with
+ * that combination, structural content aside -- i.e. that mistake already breaks the project's next
  * blue/green rebuild before this package's own validation ever runs, exactly as intended. Uses its OWN
  * throwaway alias/index with hand-built analyzers (not the demoshop's real `page` scope), so this suite
  * never depends on or mutates real project data.
@@ -132,17 +134,41 @@ class SearchAnalyzerConfigPreviewerTest extends Unit
     }
 
     /**
-     * The structural check, not the live cluster, must catch this -- there is nothing for this package to
-     * fix or reorder, the project simply never referenced its own `sac_synonyms` slot from this analyzer.
+     * A slot never referenced by the target analyzer is now a deliberate per-analyzer opt-out, not a hard
+     * save-blocking error -- validateAgainstLiveCluster() no longer catches it at all. See
+     * testCollectMissingSlotWarningsReportsTheSameCaseAsANonFatalWarning() for the same case surfaced
+     * as a non-fatal warning instead.
      */
-    public function testFailsWithAMissingFilterSlotMessageWhenTheSlotIsNeverReferencedAtAll(): void
+    public function testDoesNotFailWhenTheSlotIsNeverReferencedAtAll(): void
     {
         $previewer = $this->createPreviewer([static::ANALYZER_WITHOUT_SLOTS]);
 
         $errors = $previewer->validateAgainstLiveCluster('phpunit_source', 'PHPUNIT', $this->transferWithSynonyms());
 
-        $this->assertNotEmpty($errors);
-        $this->assertStringContainsString('sac_synonyms', $errors[0]);
+        $this->assertSame([], $errors);
+    }
+
+    /**
+     * Pre-save, non-fatal counterpart to the case above -- same detection, but returned as a warning the
+     * caller (the Zed edit form) can let the user confirm past, not a save-blocking error.
+     */
+    public function testCollectMissingSlotWarningsReportsTheSameCaseAsANonFatalWarning(): void
+    {
+        $previewer = $this->createPreviewer([static::ANALYZER_WITHOUT_SLOTS]);
+
+        $warnings = $previewer->collectMissingSlotWarnings('phpunit_source', 'PHPUNIT', $this->transferWithSynonyms());
+
+        $this->assertNotEmpty($warnings);
+        $this->assertStringContainsString('sac_synonyms', $warnings[0]);
+    }
+
+    public function testCollectMissingSlotWarningsIsEmptyWhenEveryReferencedSlotIsPresent(): void
+    {
+        $previewer = $this->createPreviewer([static::ANALYZER_WITH_CORRECTLY_POSITIONED_SLOTS]);
+
+        $warnings = $previewer->collectMissingSlotWarnings('phpunit_source', 'PHPUNIT', $this->transferWithSynonyms());
+
+        $this->assertSame([], $warnings);
     }
 
     /**

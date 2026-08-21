@@ -90,6 +90,15 @@ class SearchAnalyzerConfigEditForm extends AbstractType
     public const FIELD_SYNONYMS_TEXT = 'synonymsText';
 
     /**
+     * Set only by the "Save anyway" button rendered alongside a missing-slot warning banner -- tells
+     * the controller the user has already seen and confirmed past those warnings once, so this exact
+     * submit shouldn't re-trigger the warning gate. See ConfigController::editAction().
+     *
+     * @var string
+     */
+    public const FIELD_CONFIRMED = 'confirmed';
+
+    /**
      * @var string
      */
     public const OPTION_STEMMER_LANGUAGE_CHOICES = 'stemmerLanguageChoices';
@@ -137,6 +146,9 @@ class SearchAnalyzerConfigEditForm extends AbstractType
         $builder->add(static::FIELD_STORE_NAME, HiddenType::class, [
             'constraints' => [new NotBlank()],
         ]);
+        $builder->add(static::FIELD_CONFIRMED, HiddenType::class, [
+            'data' => '',
+        ]);
 
         $builder->add(static::FIELD_STEMMER_LANGUAGE, ChoiceType::class, [
             'label' => 'Stemmer language',
@@ -181,7 +193,7 @@ class SearchAnalyzerConfigEditForm extends AbstractType
             'required' => false,
         ]);
         $builder->add(static::FIELD_SYNONYMS_TEXT, TextareaType::class, [
-            'label' => 'Synonyms, Solr-style, one rule per line (e.g. "sofa, couch")',
+            'label' => 'Synonyms, Solr-style, one rule per line (equivalent: "sofa, couch"; directional: "tv => television")',
             'required' => false,
         ]);
     }

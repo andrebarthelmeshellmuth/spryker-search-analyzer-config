@@ -25,12 +25,14 @@ interface SearchAnalyzerConfigFacadeInterface
 
     /**
      * Validates term-pattern safety first (see SearchAnalyzerConfigValidator), then probes the live
-     * cluster to confirm every field with an active value actually has its well-known filter slot
-     * (`sac_synonyms`, `sac_stemmer`, ...) referenced by the project's configured target analyzer(s) --
-     * this package never adds that slot itself, see SearchAnalyzerConfigRenderer's own class doc block
-     * and the README's "How it works" (see SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()).
-     * Catching this here means a missing slot, or any other combination OpenSearch itself would reject,
-     * fails loudly on Save, not silently until the next Apply/rebuild.
+     * cluster to confirm the resulting settings are actually legal (see
+     * SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()) -- an unrecognized value, or a
+     * chain-order mistake OpenSearch itself rejects, fails loudly on Save, not silently until the next
+     * Apply/rebuild. Does NOT block on a field with an active value whose well-known filter slot
+     * (`sac_synonyms`, `sac_stemmer`, ...) simply isn't referenced by one of the project's target
+     * analyzer(s) -- that's a deliberate per-analyzer opt-out, not an error (see
+     * SearchAnalyzerConfigRenderer's own class doc block); call {@see collectMissingSlotWarnings()}
+     * first if the caller wants to warn about that and let the user confirm past it.
      *
      * @api
      *
@@ -177,4 +179,21 @@ interface SearchAnalyzerConfigFacadeInterface
      * @return array<string> Names of the indices that were deleted.
      */
     public function pruneOrphanedPreviewIndices(): array;
+
+    /**
+     * Pre-save, non-fatal check for a caller (the Zed edit form) that wants to warn the user and let them
+     * confirm past it, rather than have {@see save()} silently apply a field to fewer analyzers than they
+     * might expect. Returns one message per (active field, target analyzer) combination where that
+     * analyzer's own chain doesn't reference the field's well-known slot -- a deliberate per-analyzer
+     * opt-out (see SearchAnalyzerConfigRenderer's own class doc block) is indistinguishable from a
+     * forgotten schema declaration from here, so this is advisory only and never blocks {@see save()}
+     * itself. Read-only: no cluster write, no persistence.
+     *
+     * @api
+     *
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string>
+     */
+    public function collectMissingSlotWarnings(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer): array;
 }

@@ -49,6 +49,22 @@ class ConfigController extends AbstractScopeController
             /** @var array<string, mixed> $submittedData */
             $submittedData = $editForm->getData();
             $searchAnalyzerConfigTransfer = $this->formDataToTransfer($submittedData, $sourceIdentifier, $storeName);
+            $confirmed = (string)$submittedData[SearchAnalyzerConfigEditForm::FIELD_CONFIRMED] === '1';
+
+            if (!$confirmed) {
+                $missingSlotWarnings = $this->getFacade()->collectMissingSlotWarnings($searchAnalyzerConfigTransfer);
+
+                if ($missingSlotWarnings !== []) {
+                    $this->addInfoMessage('Some fields are active but not referenced by every target analyzer -- review the warnings below, then click "Save anyway" to confirm and save as-is.');
+
+                    return $this->viewResponse([
+                        'sourceIdentifier' => $sourceIdentifier,
+                        'storeName' => $storeName,
+                        'editFormView' => $editForm->createView(),
+                        'missingSlotWarnings' => $missingSlotWarnings,
+                    ]);
+                }
+            }
 
             try {
                 $errors = $this->getFacade()->save($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::CHANGE_SOURCE_MANUAL, 'zed-gui');
@@ -59,6 +75,7 @@ class ConfigController extends AbstractScopeController
                     'sourceIdentifier' => $sourceIdentifier,
                     'storeName' => $storeName,
                     'editFormView' => $editForm->createView(),
+                    'missingSlotWarnings' => [],
                 ]);
             }
 
@@ -77,6 +94,7 @@ class ConfigController extends AbstractScopeController
             'sourceIdentifier' => $sourceIdentifier,
             'storeName' => $storeName,
             'editFormView' => $editForm->createView(),
+            'missingSlotWarnings' => [],
         ]);
     }
 

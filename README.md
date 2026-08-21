@@ -10,6 +10,7 @@
 - [The Zed GUI](#the-zed-gui)
 - [Configuration](#configuration)
 - [How it works](#how-it-works)
+  - [Per-analyzer opt-out: not every target analyzer needs every slot](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot)
   - [Filter chain order is your project's responsibility — and why it matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)
 - [Data model](#data-model)
 - [Managing config without a GUI](#managing-config-without-a-gui)
@@ -194,7 +195,10 @@ Under **Search Toolbox → Search Analyzer Config** in the back office:
   Copy to another scope, Preview, History, and Apply (the explicit rebuild trigger — see [How it
   works](#how-it-works)'s two-step Apply design).
 - **Edit** — the five fields plus the four term lists (one term per line). Saving only stages the config;
-  it never touches a live index.
+  it never touches a live index. If an active field's slot isn't referenced by one of the target
+  analyzers (a deliberate per-analyzer opt-out is indistinguishable from a forgotten schema declaration —
+  see [Per-analyzer opt-out](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot)), Save shows
+  a one-time warning banner instead of saving immediately; "Save anyway" confirms and saves as-is.
 - **Copy** — a confirm screen naming the target scope before overwriting it; see
   [`SearchAnalyzerConfigCopier`](#data-model)'s hard-override semantics.
 - **Preview** — pick a target analyzer and enter a sample search string; see a stage-by-stage token
@@ -240,16 +244,39 @@ to `SearchAnalyzerConfigFacade::renderIntoSettings()` → `SearchAnalyzerConfigR
    "synonyms": []}` and friends are valid, inert filter bodies — so a scope that had a value and had it
    cleared doesn't leave stale data behind.
 4. For a field with an ACTIVE value (e.g. a non-empty synonym list) whose slot is **not** referenced by
-   the target analyzer, throws `SearchAnalyzerConfigMissingFilterSlotException` naming the missing slot
-   and the analyzer, rather than silently inventing a filter or silently skipping the field. This is a
-   deliberate design choice over the package's earlier (pre-v1) approach, which used to insert/reorder
-   filters on the project's behalf — see [Limitations](#limitations) for why that was dropped.
+   ONE of several target analyzers, that field is simply skipped for that analyzer — a deliberate
+   per-analyzer opt-out, not an error. This is what lets a project wire decompounding/synonyms/etc. into
+   SOME of its target analyzers (e.g. an index-time analyzer) and leave them out of others (e.g. a
+   search-time one), using the exact same staged list either way — see [Per-analyzer opt-out: not every
+   target analyzer needs every slot](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot).
+   The one case that's still a hard, save-blocking error is a target analyzer name that isn't declared in
+   the live settings AT ALL (`SearchAnalyzerConfigMissingFilterSlotException`) — a real typo/config bug in
+   `getTargetAnalyzerNames()`, not something to opt out of.
 
 `sac_decompound` is always a `condition` filter wrapping a second, non-chain-visible inner filter,
 `sac_decompound_words` — never referenced from an analyzer's own `filter` array directly, only from
 `sac_decompound`'s own `filter` key, so it needs no chain position of its own. An empty do-not-decompound
 list degrades the condition script to "always true" (i.e. behaves identically to an unconditional
 decompounder), so there's no separate "plain vs. condition-wrapped" filter identity to choose between.
+
+### Per-analyzer opt-out: not every target analyzer needs every slot
+
+If `getTargetAnalyzerNames()` lists more than one analyzer (e.g. this shop's own `fulltext_index_analyzer`
+and `fulltext_search_analyzer`), they don't all have to reference the same slots. Declaring `sac_decompound`
+in one analyzer's chain and leaving it out of another's is a legitimate, deliberate choice — that analyzer
+just doesn't get decompounding, using the exact same staged word list the other analyzer gets (the slot's
+body is shared, index-level `analysis.filter` data; only whether an analyzer *references* the name differs).
+This applies uniformly to all six slots (`sac_normalization`, `sac_decompound`, `sac_synonyms`,
+`sac_stopwords`, `sac_keyword_marker`, `sac_stemmer`), not just decompound.
+
+Because "this analyzer intentionally doesn't reference the slot" and "someone forgot to declare it" look
+identical from this package's side, the Zed edit form still warns you before saving: submitting the Edit
+form runs a read-only check (`SearchAnalyzerConfigFacade::collectMissingSlotWarnings()`) and, if any active
+field's slot isn't referenced by one of the target analyzers, shows a one-time warning banner listing
+exactly which field/analyzer combinations are affected, instead of saving immediately. Reviewing it and
+clicking **"Save anyway"** confirms and saves as-is; nothing is persisted until then. This warning is
+advisory only and never reappears once confirmed for that submit — it is NOT recorded into the scope's
+revision history.
 
 ### Filter chain order is your project's responsibility — and why it matters
 

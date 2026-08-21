@@ -9,9 +9,22 @@
             <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
             <p>Saving only STAGES this config -- it does not touch a live index. Use "Apply" on the overview page afterward.</p>
 
+            {% if missingSlotWarnings is defined and missingSlotWarnings is not empty %}
+                <div class="alert alert-warning">
+                    <strong>{{ 'Not saved yet -- some active fields aren\'t referenced by every target analyzer:' | trans }}</strong>
+                    <ul>
+                        {% for warning in missingSlotWarnings %}
+                            <li>{{ warning }}</li>
+                        {% endfor %}
+                    </ul>
+                    <p class="text-muted">{{ 'This may be intentional (e.g. decompounding wired into some analyzers but not others) -- click "Save anyway" below to confirm and save as-is, or adjust the field/schema first.' | trans }}</p>
+                </div>
+            {% endif %}
+
             {{ form_start(editFormView) }}
                 {{ form_widget(editFormView.sourceIdentifier) }}
                 {{ form_widget(editFormView.storeName) }}
+                {{ form_widget(editFormView.confirmed, { id: 'sac-edit-confirmed' }) }}
 
                 <div class="row">
                     <div class="col-md-6">{{ form_row(editFormView.stemmerLanguage) }}</div>
@@ -39,6 +52,10 @@
                 {{ form_row(editFormView.synonymsText) }}
 
                 <button type="submit" class="btn btn-primary">{{ 'Save' | trans }}</button>
+                {% if missingSlotWarnings is defined and missingSlotWarnings is not empty %}
+                    <button type="submit" class="btn btn-outline-warning"
+                        onclick="document.getElementById('sac-edit-confirmed').value = '1';">{{ 'Save anyway' | trans }}</button>
+                {% endif %}
             {{ form_end(editFormView) }}
         {% endblock %}
     {% endembed %}
