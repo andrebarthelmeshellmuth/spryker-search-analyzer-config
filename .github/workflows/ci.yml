@@ -159,19 +159,23 @@ jobs:
         run: vendor/bin/phpmd src github phpmd-public-methods.xml
 
   host-shop:
-    # phpstan and this package's own Codeception suite both need a real Spryker host shop: their
-    # DependencyProviders/Testers resolve against the shop's GENERATED Locator and
-    # Generated\Shared\Transfer\* classes, neither of which a standalone package's own composer.json can
-    # produce (see phpstan.neon's own bootstrapFiles comment and the README's "Testing and CI" section).
-    # Combined into ONE job (phpstan, then Zed suite) rather than two, so the shop is only installed
-    # once — that install step dominates this job's runtime.
+    # phpstan needs a real Spryker host shop: its DependencyProviders resolve against the shop's
+    # GENERATED Locator and Generated\Shared\Transfer\* classes, neither of which a standalone package's
+    # own composer.json can produce (see phpstan.neon's own bootstrapFiles comment and the README's
+    # "Testing and CI" section).
     #
     # Uses the public spryker-shop/b2b-demo-marketplace as that host shop, wired to this checkout via a
     # composer path-repository — the same install shape this package's own README documents for a real
     # adopter, just automated. This package also depends on spryker-community/search-index-alias (its
     # rebuild-target integration plugin implements that package's interface), so that sibling is wired in
     # as a SECOND path repository, checked out from its own published GitHub repo at its latest tag.
-    name: phpstan + Codeception (host shop)
+    #
+    # This package's own Zed Codeception suite is NOT run here — every test in it needs a real MySQL,
+    # OpenSearch/Elasticsearch, AND RabbitMQ all reachable at once (same reasoning as
+    # spryker-community/search-index-alias's own CI, which documents this identically), which a bare
+    # GitHub Actions runner does not provide out of the box. That suite stays a local/manual gate against
+    # the real docker-compose stack (see README); `portable tests` above is what actually runs in CI.
+    name: phpstan (host shop)
     runs-on: ubuntu-latest
     env:
       # Required just to boot the console app / Config bootstrap at all (confirmed empirically:
@@ -234,11 +238,3 @@ jobs:
       - name: phpstan
         working-directory: shop
         run: vendor/bin/phpstan analyse -c packages/spryker-community/search-analyzer-config/phpstan.neon packages/spryker-community/search-analyzer-config/src/
-
-      - name: Codeception build
-        working-directory: shop
-        run: vendor/bin/codecept build -c packages/spryker-community/search-analyzer-config/tests/SprykerCommunityTest/Zed/SearchAnalyzerConfig/codeception.yml
-
-      - name: Codeception run
-        working-directory: shop
-        run: vendor/bin/codecept run -c packages/spryker-community/search-analyzer-config/tests/SprykerCommunityTest/Zed/SearchAnalyzerConfig/codeception.yml
