@@ -12,9 +12,9 @@ namespace SprykerCommunity\Shared\SearchAnalyzerConfig;
 use Generated\Shared\Transfer\SearchIndexScopeTransfer;
 
 /**
- * The "is source/store X in this list of managed scopes" lookup used to be reimplemented independently
- * in the Facade, the Previewer, and two Communication controllers -- same match loop, four copies. Each
- * caller still owns its own miss behavior (return null vs. throw); only the match loop itself lives here.
+ * The single "is source/store X in this list of managed scopes" lookup shared by the Facade, the
+ * Previewer, and multiple Communication controllers. Each caller owns its own miss behavior (return null
+ * vs. throw); only the match loop itself lives here.
  */
 class SearchIndexManagedScopeMatcher
 {

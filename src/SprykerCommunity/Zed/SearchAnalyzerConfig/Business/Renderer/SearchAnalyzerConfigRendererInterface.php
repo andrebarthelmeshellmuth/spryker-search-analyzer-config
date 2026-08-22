@@ -67,11 +67,10 @@ interface SearchAnalyzerConfigRendererInterface
     /**
      * Auto-discovers which analyzers this package manages directly from the live settings -- any analyzer
      * whose own `filter` chain already references at least one of the well-known `sac_*` slot names is, by
-     * definition, opted in (nobody names a filter `sac_stemmer` by accident). This replaces an
-     * earlier project-maintained allowlist entirely: the slot-name convention was always the real
-     * ownership boundary, this just stops requiring it to be declared twice. A fresh store/locale with no
-     * live index yet, or a live index where nothing references any `sac_*` slot, correctly resolves to an
-     * empty list.
+     * definition, opted in (nobody names a filter `sac_stemmer` by accident). The slot-name convention
+     * already IS the real ownership boundary, so nothing needs to be separately declared or maintained
+     * anywhere else. A fresh store/locale with no live index yet, or a live index where nothing
+     * references any `sac_*` slot, correctly resolves to an empty list.
      *
      * @param array<string, mixed> $baseSettings
      *

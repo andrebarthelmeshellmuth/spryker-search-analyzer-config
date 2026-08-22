@@ -462,12 +462,12 @@ by your cluster fails the rebuild, not silently).
 - Filter chain order (and whether a slot exists on an analyzer at all) is fixed by your project's own
   schema, not user-configurable per scope from the GUI or CLI — see [Installation step
   8](#8-declare-this-packages-filter-slots-in-your-projects-own-schema-json) and [why order
-  matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters). An earlier version of
-  this package used to insert/reorder filters into an analyzer's chain automatically on the project's
-  behalf; that was dropped in favor of the current schema-declares-everything design, because auto-
-  inserting silently hides exactly the kind of chain-order mistake described above, and it can never know
-  about a filter it didn't ship itself (like `search-debug`'s own `search_debug_synonyms`) — the automated
-  fix worked for this package's own filters and left other synonym filters just as broken.
+  matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters). This package
+  deliberately never inserts or reorders filters into an analyzer's chain automatically on the project's
+  behalf, even though it could: auto-inserting would silently hide exactly the kind of chain-order
+  mistake described above, and it can never know about a filter it didn't ship itself (like
+  `search-debug`'s own `search_debug_synonyms`) — an automated fix scoped to only this package's own
+  filters would leave other synonym filters just as broken.
 - A rebuild clones settings from the currently-**live** index, never re-reads your project's schema JSON —
   so fixing chain order in your schema file alone does nothing for an already-installed, already-adopted
   scope. The live index itself needs correcting (e.g. `POST _close` → `PUT _settings` with the corrected
