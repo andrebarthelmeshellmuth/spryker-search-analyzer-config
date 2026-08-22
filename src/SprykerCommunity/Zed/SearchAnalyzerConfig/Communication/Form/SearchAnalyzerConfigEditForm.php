@@ -218,12 +218,14 @@ class SearchAnalyzerConfigEditForm extends AbstractType
             ]);
         }
 
-        if (in_array(static::FIELD_LIST_TEXT, $fields, true)) {
-            $builder->add(static::FIELD_LIST_TEXT, TextareaType::class, [
-                'label' => (string)$options[static::OPTION_LIST_TEXT_LABEL],
-                'required' => false,
-            ]);
+        if (!in_array(static::FIELD_LIST_TEXT, $fields, true)) {
+            return;
         }
+
+        $builder->add(static::FIELD_LIST_TEXT, TextareaType::class, [
+            'label' => (string)$options[static::OPTION_LIST_TEXT_LABEL],
+            'required' => false,
+        ]);
     }
 
     public function getBlockPrefix(): string

@@ -9,13 +9,12 @@ declare(strict_types = 1);
 
 namespace SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Controller;
 
-use ArrayObject;
-use Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer;
 use Generated\Shared\Transfer\SearchAnalyzerConfigTransfer;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Form\SearchAnalyzerConfigCopyForm;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Form\SearchAnalyzerConfigEditForm;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Form\SearchAnalyzerConfigEditListForm;
+use SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Mapper\SearchAnalyzerConfigTermListMapper;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -116,7 +115,7 @@ class ConfigController extends AbstractScopeController
         $listTextLabel = $listType !== null ? $this->getFactory()->getEditListLabel($listType) : 'Terms (one per line)';
 
         $editForm = $this->getFactory()
-            ->createSearchAnalyzerConfigEditForm($this->transferToFormData($existingSearchAnalyzerConfigTransfer, $listType), $fields, $listTextLabel)
+            ->createSearchAnalyzerConfigEditForm((new SearchAnalyzerConfigTermListMapper())->transferToFormData($existingSearchAnalyzerConfigTransfer, $listType), $fields, $listTextLabel)
             ->handleRequest($request);
 
         $viewVars = [
@@ -131,44 +130,80 @@ class ConfigController extends AbstractScopeController
         ];
 
         if ($editForm->isSubmitted() && $editForm->isValid()) {
-            /** @var array<string, mixed> $submittedData */
-            $submittedData = $editForm->getData();
-            $searchAnalyzerConfigTransfer = $this->formDataToTransfer($submittedData, $existingSearchAnalyzerConfigTransfer, $sourceIdentifier, $storeName, $fields, $listType);
-            $confirmed = (string)$submittedData[SearchAnalyzerConfigEditForm::FIELD_CONFIRMED] === '1';
+            $submitResponse = $this->handleEditFilterSubmit($editForm, $existingSearchAnalyzerConfigTransfer, $sourceIdentifier, $storeName, $fields, $listType, $slotName, $viewVars);
 
-            if (!$confirmed) {
-                $missingSlotWarnings = $this->filterWarningsBySlot(
-                    $this->getFacade()->collectMissingSlotWarnings($searchAnalyzerConfigTransfer),
-                    $slotName,
-                );
-
-                if ($missingSlotWarnings !== []) {
-                    $this->addInfoMessage('This field is active but not referenced by every analyzer -- review the warning below, then click "Save anyway" to confirm and save as-is.');
-
-                    return $this->viewResponse(['missingSlotWarnings' => $missingSlotWarnings] + $viewVars);
-                }
-            }
-
-            try {
-                $errors = $this->getFacade()->save($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::CHANGE_SOURCE_MANUAL, 'zed-gui');
-            } catch (Throwable $throwable) {
-                $this->addErrorMessage(sprintf('Save failed: %s', $throwable->getMessage()));
-
-                return $this->viewResponse($viewVars);
-            }
-
-            if ($errors === []) {
-                $this->addSuccessMessage('Config staged. It is NOT live yet -- use "Apply" on the Overview page to trigger a rebuild.');
-
-                return $this->redirectResponse($this->buildEditUrl($sourceIdentifier, $storeName));
-            }
-
-            foreach ($errors as $error) {
-                $this->addErrorMessage($error);
+            if ($submitResponse !== null) {
+                return $submitResponse;
             }
         }
 
         return $this->viewResponse($viewVars);
+    }
+
+    /**
+     * The submit-handling half of editFilterAction() -- split out to keep both halves under this package's
+     * own cyclomatic/NPath complexity ceilings (see phpmd.xml's codesize ruleset). Returns null to mean
+     * "fall through to $viewVars" (validation errors on the form itself, handled by the caller already
+     * having rendered $editFormView from $editForm).
+     *
+     * @param \Symfony\Component\Form\FormInterface $editForm
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $existingSearchAnalyzerConfigTransfer
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param array<string> $fields
+     * @param string|null $listType
+     * @param string $slotName
+     * @param array<string, mixed> $viewVars
+     *
+     * @return \Symfony\Component\HttpFoundation\RedirectResponse|array<string, mixed>|null
+     */
+    protected function handleEditFilterSubmit(
+        FormInterface $editForm,
+        SearchAnalyzerConfigTransfer $existingSearchAnalyzerConfigTransfer,
+        string $sourceIdentifier,
+        string $storeName,
+        array $fields,
+        ?string $listType,
+        string $slotName,
+        array $viewVars,
+    ) {
+        /** @var array<string, mixed> $submittedData */
+        $submittedData = $editForm->getData();
+        $searchAnalyzerConfigTransfer = $this->formDataToTransfer($submittedData, $existingSearchAnalyzerConfigTransfer, $sourceIdentifier, $storeName, $fields, $listType);
+        $confirmed = (string)$submittedData[SearchAnalyzerConfigEditForm::FIELD_CONFIRMED] === '1';
+
+        if (!$confirmed) {
+            $missingSlotWarnings = $this->filterWarningsBySlot(
+                $this->getFacade()->collectMissingSlotWarnings($searchAnalyzerConfigTransfer),
+                $slotName,
+            );
+
+            if ($missingSlotWarnings !== []) {
+                $this->addInfoMessage('This field is active but not referenced by every analyzer -- review the warning below, then click "Save anyway" to confirm and save as-is.');
+
+                return $this->viewResponse(['missingSlotWarnings' => $missingSlotWarnings] + $viewVars);
+            }
+        }
+
+        try {
+            $errors = $this->getFacade()->save($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::CHANGE_SOURCE_MANUAL, 'zed-gui');
+        } catch (Throwable $throwable) {
+            $this->addErrorMessage(sprintf('Save failed: %s', $throwable->getMessage()));
+
+            return $this->viewResponse($viewVars);
+        }
+
+        if ($errors === []) {
+            $this->addSuccessMessage('Config staged. It is NOT live yet -- use "Apply" on the Overview page to trigger a rebuild.');
+
+            return $this->redirectResponse($this->buildEditUrl($sourceIdentifier, $storeName));
+        }
+
+        foreach ($errors as $error) {
+            $this->addErrorMessage($error);
+        }
+
+        return null;
     }
 
     /**
@@ -197,23 +232,25 @@ class ConfigController extends AbstractScopeController
         $existingSearchAnalyzerConfigTransfer = $this->getFacade()->findByScope($sourceIdentifier, $storeName)
             ?? (new SearchAnalyzerConfigTransfer())->setSourceIdentifier($sourceIdentifier)->setStoreName($storeName);
 
+        $termListMapper = new SearchAnalyzerConfigTermListMapper();
+
         $editListForm = $this->getFactory()
             ->createSearchAnalyzerConfigEditListForm(
                 $sourceIdentifier,
                 $storeName,
                 $listType,
-                $this->termsToText($this->getListTerms($existingSearchAnalyzerConfigTransfer, $listType)),
+                $termListMapper->termsToText($termListMapper->getListTerms($existingSearchAnalyzerConfigTransfer, $listType)),
             )
             ->handleRequest($request);
 
         if ($editListForm->isSubmitted() && $editListForm->isValid()) {
             /** @var array<string, mixed> $submittedData */
             $submittedData = $editListForm->getData();
-            $terms = $this->textToTerms((string)$submittedData[SearchAnalyzerConfigEditListForm::FIELD_TEXT], $listType);
+            $terms = $termListMapper->textToTerms((string)$submittedData[SearchAnalyzerConfigEditListForm::FIELD_TEXT], $listType);
 
             $searchAnalyzerConfigTransfer = clone $existingSearchAnalyzerConfigTransfer;
             $searchAnalyzerConfigTransfer->setSourceIdentifier($sourceIdentifier)->setStoreName($storeName);
-            $this->setListTerms($searchAnalyzerConfigTransfer, $listType, $terms);
+            $termListMapper->setListTerms($searchAnalyzerConfigTransfer, $listType, $terms);
 
             try {
                 $errors = $this->getFacade()->save($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::CHANGE_SOURCE_MANUAL, 'zed-gui');
@@ -334,22 +371,62 @@ class ConfigController extends AbstractScopeController
      *
      * @return array<string>
      */
+    /**
+     * @var array<string, array<string>>
+     */
+    protected const FILTER_FIELDS = [
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => [SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE],
+        SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => [SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER],
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => [
+            SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_MODE,
+            SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE,
+            SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT,
+        ],
+        SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => [
+            SearchAnalyzerConfigEditForm::FIELD_DECOMPOUND_ENABLED,
+            SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT,
+        ],
+    ];
+
+    /**
+     * The one term list belonging to a filter (stopwords -> custom stopword list, decompound -> decompound
+     * word list) -- absent for stemmer/normalization, which have no list of their own.
+     *
+     * @var array<string, string>
+     */
+    protected const FILTER_LIST_TYPES = [
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD,
+        SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD,
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    protected const FILTER_SLOT_NAMES = [
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => 'sac_stemmer',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => 'sac_normalization',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => 'sac_stopwords',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => 'sac_decompound',
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    protected const FILTER_LABELS = [
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => 'Stemmer',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => 'Normalization',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => 'Stopwords',
+        SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => 'Decompounding',
+    ];
+
+    /**
+     * @param string $filterType One of SearchAnalyzerConfigConfig::FILTER_TYPES.
+     *
+     * @return array<string>
+     */
     protected function resolveFilterFields(string $filterType): array
     {
-        return match ($filterType) {
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => [SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE],
-            SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => [SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER],
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => [
-                SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_MODE,
-                SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE,
-                SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT,
-            ],
-            SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => [
-                SearchAnalyzerConfigEditForm::FIELD_DECOMPOUND_ENABLED,
-                SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT,
-            ],
-            default => [],
-        };
+        return static::FILTER_FIELDS[$filterType] ?? [];
     }
 
     /**
@@ -360,11 +437,7 @@ class ConfigController extends AbstractScopeController
      */
     protected function resolveFilterListType(string $filterType): ?string
     {
-        return match ($filterType) {
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD,
-            SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD,
-            default => null,
-        };
+        return static::FILTER_LIST_TYPES[$filterType] ?? null;
     }
 
     /**
@@ -372,13 +445,7 @@ class ConfigController extends AbstractScopeController
      */
     protected function resolveFilterSlotName(string $filterType): string
     {
-        return match ($filterType) {
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => 'sac_stemmer',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => 'sac_normalization',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => 'sac_stopwords',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => 'sac_decompound',
-            default => '',
-        };
+        return static::FILTER_SLOT_NAMES[$filterType] ?? '';
     }
 
     /**
@@ -386,13 +453,7 @@ class ConfigController extends AbstractScopeController
      */
     protected function resolveFilterLabel(string $filterType): string
     {
-        return match ($filterType) {
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STEMMER => 'Stemmer',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_NORMALIZATION => 'Normalization',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_STOPWORDS => 'Stopwords',
-            SearchAnalyzerConfigConfig::FILTER_TYPE_DECOMPOUND => 'Decompounding',
-            default => $filterType,
-        };
+        return static::FILTER_LABELS[$filterType] ?? $filterType;
     }
 
     /**
@@ -436,6 +497,8 @@ class ConfigController extends AbstractScopeController
         string $sourceIdentifier,
         string $storeName,
     ): array {
+        $termListMapper = new SearchAnalyzerConfigTermListMapper();
+
         $config = $this->getFactory()->getConfig();
         $stemmerLanguageLabels = $config->getAllowedStemmerLanguages();
         $normalizationFilterLabels = $config->getAllowedNormalizationFilters();
@@ -448,12 +511,12 @@ class ConfigController extends AbstractScopeController
 
         $stopwordsSummary = match ($stopwordsMode) {
             SearchAnalyzerConfigConfig::STOPWORDS_MODE_BUILTIN => 'Built-in: ' . ($stopwordsBuiltinLanguageLabels[$searchAnalyzerConfigTransfer->getStopwordsBuiltinLanguage() ?? ''] ?? 'None selected'),
-            SearchAnalyzerConfigConfig::STOPWORDS_MODE_CUSTOM => count($this->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD)) . ' custom word(s) staged',
+            SearchAnalyzerConfigConfig::STOPWORDS_MODE_CUSTOM => count($termListMapper->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD)) . ' custom word(s) staged',
             default => 'None',
         };
 
         $decompoundSummary = $decompoundEnabled
-            ? 'Enabled (' . count($this->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD)) . ' word(s) staged)'
+            ? 'Enabled (' . count($termListMapper->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD)) . ' word(s) staged)'
             : 'Disabled';
 
         return [
@@ -488,42 +551,18 @@ class ConfigController extends AbstractScopeController
             [
                 'slot' => 'sac_keyword_marker',
                 'label' => 'Do-not-decompound / brand list',
-                'summary' => count($this->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND)) . ' term(s) staged',
+                'summary' => count($termListMapper->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND)) . ' term(s) staged',
                 'editUrl' => $this->buildEditListUrl($sourceIdentifier, $storeName, SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND),
                 'edited' => $editedSlots['sac_keyword_marker'] ?? false,
             ],
             [
                 'slot' => 'sac_synonyms',
                 'label' => 'Synonyms',
-                'summary' => count($this->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM)) . ' rule(s) staged',
+                'summary' => count($termListMapper->getListTerms($searchAnalyzerConfigTransfer, SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM)) . ' rule(s) staged',
                 'editUrl' => $this->buildEditListUrl($sourceIdentifier, $storeName, SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM),
                 'edited' => $editedSlots['sac_synonyms'] ?? false,
             ],
         ];
-    }
-
-    /**
-     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
-     *
-     * @return array<string, mixed>
-     */
-    protected function transferToFormData(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer, ?string $listType = null): array
-    {
-        $formData = [
-            SearchAnalyzerConfigEditForm::FIELD_SOURCE_IDENTIFIER => $searchAnalyzerConfigTransfer->getSourceIdentifier(),
-            SearchAnalyzerConfigEditForm::FIELD_STORE_NAME => $searchAnalyzerConfigTransfer->getStoreName(),
-            SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE => $searchAnalyzerConfigTransfer->getStemmerLanguage() ?? '',
-            SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER => $searchAnalyzerConfigTransfer->getNormalizationFilter() ?? '',
-            SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_MODE => $searchAnalyzerConfigTransfer->getStopwordsMode() ?? SearchAnalyzerConfigConfig::STOPWORDS_MODE_NONE,
-            SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE => $searchAnalyzerConfigTransfer->getStopwordsBuiltinLanguage() ?? '',
-            SearchAnalyzerConfigEditForm::FIELD_DECOMPOUND_ENABLED => (bool)$searchAnalyzerConfigTransfer->getDecompoundEnabled(),
-        ];
-
-        if ($listType !== null) {
-            $formData[SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT] = $this->termsToText($this->getListTerms($searchAnalyzerConfigTransfer, $listType));
-        }
-
-        return $formData;
     }
 
     /**
@@ -547,16 +586,18 @@ class ConfigController extends AbstractScopeController
         array $fields,
         ?string $listType = null,
     ): SearchAnalyzerConfigTransfer {
+        $termListMapper = new SearchAnalyzerConfigTermListMapper();
+
         $searchAnalyzerConfigTransfer = (clone $existingSearchAnalyzerConfigTransfer)
             ->setSourceIdentifier($sourceIdentifier)
             ->setStoreName($storeName);
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE, $fields, true)) {
-            $searchAnalyzerConfigTransfer->setStemmerLanguage($this->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE]));
+            $searchAnalyzerConfigTransfer->setStemmerLanguage($termListMapper->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_STEMMER_LANGUAGE]));
         }
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER, $fields, true)) {
-            $searchAnalyzerConfigTransfer->setNormalizationFilter($this->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER]));
+            $searchAnalyzerConfigTransfer->setNormalizationFilter($termListMapper->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_NORMALIZATION_FILTER]));
         }
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_MODE, $fields, true)) {
@@ -564,7 +605,7 @@ class ConfigController extends AbstractScopeController
         }
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE, $fields, true)) {
-            $searchAnalyzerConfigTransfer->setStopwordsBuiltinLanguage($this->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE]));
+            $searchAnalyzerConfigTransfer->setStopwordsBuiltinLanguage($termListMapper->nullIfEmpty((string)$formData[SearchAnalyzerConfigEditForm::FIELD_STOPWORDS_BUILTIN_LANGUAGE]));
         }
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_DECOMPOUND_ENABLED, $fields, true)) {
@@ -572,88 +613,9 @@ class ConfigController extends AbstractScopeController
         }
 
         if (in_array(SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT, $fields, true) && $listType !== null) {
-            $this->setListTerms($searchAnalyzerConfigTransfer, $listType, $this->textToTerms((string)$formData[SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT], $listType));
+            $termListMapper->setListTerms($searchAnalyzerConfigTransfer, $listType, $termListMapper->textToTerms((string)$formData[SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT], $listType));
         }
 
         return $searchAnalyzerConfigTransfer;
-    }
-
-    /**
-     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
-     * @param string $listType One of SearchAnalyzerConfigConfig::LIST_TYPES.
-     *
-     * @return \ArrayObject<int, \Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer>
-     */
-    protected function getListTerms(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer, string $listType): ArrayObject
-    {
-        return match ($listType) {
-            SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM => $searchAnalyzerConfigTransfer->getSynonyms(),
-            SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD => $searchAnalyzerConfigTransfer->getDecompoundWords(),
-            SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD => $searchAnalyzerConfigTransfer->getStopwords(),
-            SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND => $searchAnalyzerConfigTransfer->getDoNotDecompoundTerms(),
-            default => new ArrayObject(),
-        };
-    }
-
-    /**
-     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
-     * @param string $listType One of SearchAnalyzerConfigConfig::LIST_TYPES.
-     * @param \ArrayObject<int, \Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer> $terms
-     */
-    protected function setListTerms(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer, string $listType, ArrayObject $terms): void
-    {
-        match ($listType) {
-            SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM => $searchAnalyzerConfigTransfer->setSynonyms($terms),
-            SearchAnalyzerConfigConfig::LIST_TYPE_DECOMPOUND_WORD => $searchAnalyzerConfigTransfer->setDecompoundWords($terms),
-            SearchAnalyzerConfigConfig::LIST_TYPE_STOPWORD => $searchAnalyzerConfigTransfer->setStopwords($terms),
-            SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND => $searchAnalyzerConfigTransfer->setDoNotDecompoundTerms($terms),
-            default => null,
-        };
-    }
-
-    /**
-     * @param iterable<\Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer> $searchAnalyzerConfigTermTransfers
-     */
-    protected function termsToText(iterable $searchAnalyzerConfigTermTransfers): string
-    {
-        $terms = [];
-
-        foreach ($searchAnalyzerConfigTermTransfers as $searchAnalyzerConfigTermTransfer) {
-            $terms[] = $searchAnalyzerConfigTermTransfer->getTerm();
-        }
-
-        return implode("\n", $terms);
-    }
-
-    /**
-     * @param string $text
-     * @param string $listType
-     *
-     * @return \ArrayObject<int, \Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer>
-     */
-    protected function textToTerms(string $text, string $listType): ArrayObject
-    {
-        $searchAnalyzerConfigTermTransfers = [];
-        $sortOrder = 0;
-
-        foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
-            $term = trim($line);
-
-            if ($term === '') {
-                continue;
-            }
-
-            $searchAnalyzerConfigTermTransfers[] = (new SearchAnalyzerConfigTermTransfer())
-                ->setListType($listType)
-                ->setTerm($term)
-                ->setSortOrder($sortOrder++);
-        }
-
-        return new ArrayObject($searchAnalyzerConfigTermTransfers);
-    }
-
-    protected function nullIfEmpty(string $value): ?string
-    {
-        return $value === '' ? null : $value;
     }
 }

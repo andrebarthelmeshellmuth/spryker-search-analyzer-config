@@ -109,9 +109,8 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         $deletedIndexNames = [];
 
         foreach ($this->findPreviewIndexNames($elasticaClient) as $previewIndexName) {
-            $ageSeconds = $this->getIndexAgeSeconds($elasticaClient, $previewIndexName);
-
-            if ($ageSeconds === null || $ageSeconds < static::ORPHAN_AGE_SECONDS) {
+            // A null age (index vanished mid-scan) defaults to "not old enough" -- nothing to prune.
+            if (($this->getIndexAgeSeconds($elasticaClient, $previewIndexName) ?? 0) < static::ORPHAN_AGE_SECONDS) {
                 continue;
             }
 
@@ -142,37 +141,26 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
     ): array {
-        try {
-            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
-        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+        $resolved = $this->resolveLiveBaseSettings($sourceIdentifier, $storeName);
+
+        if ($resolved === null) {
             // Nothing live to validate against, and nothing that could be applied either way -- see the
-            // interface's own doc block.
+            // interface's own doc block. Also the fail-OPEN path for a real cluster/connectivity/response
+            // problem: don't block an otherwise-valid save over a cluster hiccup. If a problem is real,
+            // it still surfaces loudly the next time Apply actually runs a rebuild (recorded in
+            // search-index-alias's own spy_search_index_rollout.failure_reason) -- this check is a
+            // convenience that catches it earlier, not the only safety net.
             return [];
         }
 
-        $elasticaClient = $this->elasticaClientProvider->getClient();
-
-        try {
-            $baseSettings = $this->readLiveAnalysisSettings($elasticaClient, $aliasName);
-        } catch (ElasticaExceptionInterface) {
-            // Fail OPEN, but only for a real cluster/connectivity/response problem: don't block an
-            // otherwise-valid save over a cluster hiccup. If a problem is real, it still surfaces loudly
-            // the next time Apply actually runs a rebuild (recorded in search-index-alias's own
-            // spy_search_index_rollout.failure_reason) -- this check is a convenience that catches it
-            // earlier, not the only safety net. A non-Elastica error (e.g. a bug in
-            // selectNewestIndexSettings()) is NOT swallowed here -- it propagates, since silently
-            // disabling validation over an internal bug would hide a real problem instead of failing open
-            // on one.
-            return [];
-        }
-
+        [$aliasName, $baseSettings] = $resolved;
         $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         if ($afterSettings === $baseSettings) {
             return [];
         }
 
-        return $this->probeSettingsAgainstLiveCluster($elasticaClient, $aliasName, $afterSettings);
+        return $this->probeSettingsAgainstLiveCluster($this->elasticaClientProvider->getClient(), $aliasName, $afterSettings);
     }
 
     /**
@@ -194,19 +182,13 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
     ): array {
-        try {
-            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
-        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+        $resolved = $this->resolveLiveBaseSettings($sourceIdentifier, $storeName);
+
+        if ($resolved === null) {
             return [];
         }
 
-        try {
-            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
-        } catch (ElasticaExceptionInterface) {
-            return [];
-        }
-
-        return $this->renderer->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings);
+        return $this->renderer->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $resolved[1]);
     }
 
     /**
@@ -222,19 +204,13 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
      */
     public function describeSlotAvailability(string $sourceIdentifier, string $storeName): array
     {
-        try {
-            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
-        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+        $resolved = $this->resolveLiveBaseSettings($sourceIdentifier, $storeName);
+
+        if ($resolved === null) {
             return [];
         }
 
-        try {
-            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
-        } catch (ElasticaExceptionInterface) {
-            return [];
-        }
-
-        return $this->renderer->describeSlotAvailability($baseSettings);
+        return $this->renderer->describeSlotAvailability($resolved[1]);
     }
 
     /**
@@ -260,29 +236,20 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
     ): array {
-        $editedSlots = array_fill_keys(SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER, false);
+        $slotNames = SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER;
+        $resolved = $this->resolveLiveBaseSettings($sourceIdentifier, $storeName);
 
-        try {
-            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
-        } catch (SearchAnalyzerConfigScopeNotManagedException) {
-            return $editedSlots;
+        if ($resolved === null) {
+            return array_fill_keys($slotNames, false);
         }
 
-        try {
-            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
-        } catch (ElasticaExceptionInterface) {
-            return $editedSlots;
-        }
-
+        [, $baseSettings] = $resolved;
         $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings);
 
-        foreach (array_keys($editedSlots) as $slotName) {
-            $liveBody = $baseSettings['analysis']['filter'][$slotName] ?? null;
-            $stagedBody = $afterSettings['analysis']['filter'][$slotName] ?? null;
-            $editedSlots[$slotName] = $liveBody !== $stagedBody;
-        }
-
-        return $editedSlots;
+        return array_combine($slotNames, array_map(
+            static fn (string $slotName): bool => ($baseSettings['analysis']['filter'][$slotName] ?? null) !== ($afterSettings['analysis']['filter'][$slotName] ?? null),
+            $slotNames,
+        ));
     }
 
     /**
@@ -297,19 +264,43 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
      */
     public function getManagedAnalyzerNames(string $sourceIdentifier, string $storeName): array
     {
+        $resolved = $this->resolveLiveBaseSettings($sourceIdentifier, $storeName);
+
+        if ($resolved === null) {
+            return [];
+        }
+
+        return $this->renderer->resolveTargetAnalyzerNames($resolved[1]);
+    }
+
+    /**
+     * Shared by every live-cluster read on this class (validateAgainstLiveCluster(),
+     * collectMissingSlotWarnings(), describeSlotAvailability(), describeEditedSlots(),
+     * getManagedAnalyzerNames()) -- resolves the scope's alias, then reads its live analysis settings,
+     * failing open (null) for an unmanaged scope or a cluster hiccup exactly like every one of those
+     * callers already wants. Returns the alias name alongside the settings since a couple of callers
+     * (validateAgainstLiveCluster()) need it again afterward, for the probe index.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array{0: string, 1: array<string, mixed>}|null
+     */
+    protected function resolveLiveBaseSettings(string $sourceIdentifier, string $storeName): ?array
+    {
         try {
             $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
         } catch (SearchAnalyzerConfigScopeNotManagedException) {
-            return [];
+            return null;
         }
 
         try {
-            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
+            return [$aliasName, $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName)];
         } catch (ElasticaExceptionInterface) {
-            return [];
+            // Fail OPEN, but only for a real cluster/connectivity/response problem -- see
+            // validateAgainstLiveCluster()'s own doc block for why that's safe.
+            return null;
         }
-
-        return $this->renderer->resolveTargetAnalyzerNames($baseSettings);
     }
 
     /**

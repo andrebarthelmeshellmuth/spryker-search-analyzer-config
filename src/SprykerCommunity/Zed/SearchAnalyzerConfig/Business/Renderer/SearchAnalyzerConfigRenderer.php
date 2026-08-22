@@ -167,9 +167,11 @@ class SearchAnalyzerConfigRenderer implements SearchAnalyzerConfigRendererInterf
         foreach ($analyzers as $analyzerName => $analyzerSettings) {
             $chainFilterNames = is_array($analyzerSettings['filter'] ?? null) ? $analyzerSettings['filter'] : [];
 
-            if (array_intersect(static::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER, $chainFilterNames) !== []) {
-                $targetAnalyzerNames[] = (string)$analyzerName;
+            if (array_intersect(static::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER, $chainFilterNames) === []) {
+                continue;
             }
+
+            $targetAnalyzerNames[] = (string)$analyzerName;
         }
 
         return $targetAnalyzerNames;
