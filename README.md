@@ -59,8 +59,9 @@ script — see [Managing config without a GUI](#managing-config-without-a-gui) �
 
 - PHP 8.3+
 - A Spryker shop on `spryker/search-elasticsearch` ^1.23.0
-- `spryker-community/search-index-alias` installed and adopted for the scope(s) you want to configure —
-  this package has nothing to materialize a staged config into without it
+- `spryker-community/search-index-alias` ^1.0.0, adopted for the scope(s) you want to configure — a hard
+  `composer require` of this package (Composer will refuse to install this package without it), not an
+  optional integration: this package has nothing to materialize a staged config into without it
 
 ## Installation
 
@@ -379,9 +380,10 @@ Three tables, one row per `(sourceIdentifier, storeName)` scope for the first:
   row holding a full JSON snapshot of the parent row's editable columns plus its complete term list at
   that point, so "restore to revision N" is a single row read, not a reconstruction.
 
-No foreign key to search-index-alias's own `spy_search_index_rollout` — this package stays independently
-installable without a hard schema dependency on that sibling; `applied_index_name`/`applied_at` are
-enough to correlate manually.
+No foreign key to search-index-alias's own `spy_search_index_rollout` — not because the two packages are
+independent (search-index-alias **is** a hard `composer require` of this package, see
+[Requirements](#requirements)), but to avoid tying this package's own migrations to search-index-alias's
+schema evolution; `applied_index_name`/`applied_at` are enough to correlate manually.
 
 ## Managing config without a GUI
 

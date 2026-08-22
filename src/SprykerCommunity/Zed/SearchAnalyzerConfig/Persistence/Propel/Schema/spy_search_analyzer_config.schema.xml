@@ -66,10 +66,12 @@
         Append-only audit/restore trail: every save (manual edit, DE->AT copy, or a restore itself)
         writes one new row here holding a full JSON snapshot of spy_search_analyzer_config's own columns
         plus its full term list at that point, so "restore to revision N" is a single row read, not a
-        reconstruction. Deliberately no FK to search-index-alias's spy_search_index_rollout: this package
-        and search-index-alias must each stay independently installable, so no cross-package schema
-        dependency; applied_index_name/applied_at on the parent row are enough to correlate manually if
-        needed.
+        reconstruction. Deliberately no FK to search-index-alias's spy_search_index_rollout: NOT because
+        of package independence (search-index-alias is a hard composer dependency of this package — see
+        README, "Requirements") but to avoid tying this package's own migrations to search-index-alias's
+        schema evolution (a FK breaks the moment that table/column is ever renamed in a future
+        search-index-alias major version); applied_index_name/applied_at on the parent row are enough to
+        correlate manually if needed.
     -->
     <table name="spy_search_analyzer_config_revision" idMethod="native" identifierQuoting="true">
         <column name="id_search_analyzer_config_revision" type="INTEGER" required="true" autoIncrement="true" primaryKey="true"/>
