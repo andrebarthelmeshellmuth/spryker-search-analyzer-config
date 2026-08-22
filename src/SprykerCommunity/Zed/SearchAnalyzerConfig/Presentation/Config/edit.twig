@@ -1,0 +1,67 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'Edit ' ~ sourceIdentifier ~ ' / ' ~ storeName %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
+        {% block widget_content %}
+            <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
+            <p>{{ 'Every filter below is ONE value, shared by every analyzer whose column shows a checkmark for it -- the single "Edit" link per row (not one per analyzer) opens the one place it\'s edited, same as editing a shared index setting/mapping.' | trans }}</p>
+
+            {% if hasLiveDiff is defined and hasLiveDiff %}
+                <div class="alert alert-info">
+                    <strong>{{ 'This scope\'s staged config differs from what\'s currently live' | trans }}</strong> -- {{ 'rows marked "edited" below show what will actually change the next time this scope is rebuilt. Use "Apply" on the Overview page to make them live'|trans }}{% if resetFormView is not empty %}{{ ', or discard them here.'|trans }}{% else %}.{% endif %}
+                    {% if resetFormView is not empty %}
+                        {{ form_start(resetFormView, { action: url('/search-analyzer-config/history/restore'), method: 'POST' }) }}
+                        {{ form_widget(resetFormView) }}
+                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                            onclick="return confirm('Discard all staged changes and reset this scope back to the last applied revision?');">{{ 'Reset changes' | trans }}</button>
+                        {{ form_end(resetFormView) }}
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            {% if targetAnalyzerNames is defined and targetAnalyzerNames is not empty %}
+                <div class="table-responsive" style="overflow-x: auto;">
+                    <table class="table table-bordered table-striped" style="min-width: 500px;">
+                        <thead>
+                            <tr>
+                                <th>{{ 'Filter' | trans }}</th>
+                                {% for analyzerName in targetAnalyzerNames %}
+                                    <th>{{ analyzerName }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for filterRow in filterRows %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ filterRow.label | trans }}</strong>
+                                        {% if filterRow.edited %}
+                                            <span class="label label-info">{{ 'edited' | trans }}</span>
+                                        {% endif %}
+                                        <div class="text-muted">{{ filterRow.summary }}</div>
+                                        <a href="{{ filterRow.editUrl }}">{{ 'Edit' | trans }}</a>
+                                    </td>
+                                    {% for analyzerName in targetAnalyzerNames %}
+                                        <td class="text-center">
+                                            {% if slotAvailability[filterRow.slot] is defined and slotAvailability[filterRow.slot][analyzerName] is defined and slotAvailability[filterRow.slot][analyzerName] %}
+                                                <span class="label label-success">&#10003;</span>
+                                            {% else %}
+                                                <span class="text-muted">&#8212;</span>
+                                            {% endif %}
+                                        </td>
+                                    {% endfor %}
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted">{{ 'A blank cell means that analyzer\'s own filter chain doesn\'t reference this slot at all -- editing the field still saves fine, it just has no effect there.' | trans }}</p>
+            {% else %}
+                <p class="text-muted">{{ 'No analyzer in the live index references any of this package\'s well-known filter slots yet -- see the README, "Installation".' | trans }}</p>
+            {% endif %}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}

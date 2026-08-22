@@ -1,0 +1,240 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Authenticates composer's GitHub dist/API calls with the workflow's own GITHUB_TOKEN -- unauthenticated
+# codeload.github.com downloads share a low, IP-wide rate limit that a normal composer install (dozens of
+# packages) can exhaust on its own, surfacing as "could not be downloaded (HTTP/2 429)" partway through.
+# Authenticated requests get a much higher ceiling. GITHUB_TOKEN is always available in Actions, no secret
+# to configure.
+env:
+  COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.GITHUB_TOKEN }}"}}'
+
+jobs:
+  xml:
+    # The ruleset files are configuration that nothing else validates: phpcs reacts to a malformed
+    # ruleset by exiting non-zero with no parse error of its own, and an XML comment containing a
+    # double hyphen is enough to do it -- a silent, whole-ruleset failure that looks like a lint
+    # error. xmllint reports the line and column instead.
+    name: xmllint (rulesets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install xmllint
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+      - name: Validate ruleset XML is well-formed
+        run: xmllint --noout phpcs.xml phpmd*.xml
+
+  validate:
+    name: composer validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer validate --no-check-publish
+
+  style:
+    name: phpcs (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/phpcs
+
+  rector:
+    # Dry run only, never writes to the working tree — guards against regressions on rules already
+    # vetted for this codebase (see rector.php's own comments for what's skipped and why).
+    name: rector (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          # opcache.enable_cli must be off: when on, Rector's BetterReflection-based autoloading
+          # silently fails to parse EVERY file in this project (confirmed empirically on the sibling
+          # search-debug/search-ranking/search-variant-facets packages) instead of erroring cleanly.
+          ini-values: opcache.enable_cli=0
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: composer rector-dry-run
+
+  floors:
+    # The check that matters most for this package. Its dependency floors are claims about which
+    # Spryker versions an adopter may install; a shop leaner than the development shop is exactly
+    # where an undeclared dependency surfaces, and that cannot be observed while developing inside a
+    # full demo shop. This resolves every constraint to its oldest allowed version and asserts each
+    # vendor symbol used in src/ actually exists there.
+    name: dependency floors (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer check-floors
+
+  phpstan-ci:
+    # Standalone CI variant (`composer phpstan-ci`, see phpstan.ci.neon) — generates just the Transfer
+    # classes this package needs (same generator the portable-tests job below uses) and ignores the two
+    # categories of class that only exist inside a real host shop (Propel Orm\Zed\* models, the
+    # aggregated Ide\AutoCompletion stub). The full host-shop-aware `composer phpstan` check still runs
+    # from the host-shop job below — see README, "Testing and CI".
+    name: phpstan (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: composer phpstan-ci
+
+  portable-tests:
+    # Runs this package's own `@group Portable` tests (Copier, Renderer, Validator — pure logic, no
+    # Locator/DB/search engine involved), standalone. `Generated\Shared\Transfer\*` is produced here via
+    # a direct TransferBusinessFactory call (tests/_ci-standalone/generate-transfers.php), bypassing the
+    # full Zed Console/Kernel bootstrap. This package's DB-backed suite (EntityManager, Repository,
+    # Facade) stays covered by the host-shop job below, not excluded here.
+    name: portable tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: php tests/_ci-standalone/generate-transfers.php
+      - run: vendor/bin/codecept run -c tests/codeception.portable.yml -g Portable
+
+  complexity:
+    # Two SEPARATE phpmd runs, not one combined ruleset: PHPMD merges every loaded ruleset's
+    # exclude-pattern into one global file-ignore list for a single invocation, so keeping
+    # TooManyPublicMethods' Facade/Factory exemption in its own ruleset (run on its own) is the only
+    # way to exempt just that one rule without also hiding Facades/Factories from the rules below.
+    name: phpmd (codesize)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: vendor/bin/phpmd src github phpmd.xml
+      - name: Public method count (Facades/Factories exempt)
+        run: vendor/bin/phpmd src github phpmd-public-methods.xml
+
+  host-shop:
+    # phpstan needs a real Spryker host shop: its DependencyProviders resolve against the shop's
+    # GENERATED Locator and Generated\Shared\Transfer\* classes, neither of which a standalone package's
+    # own composer.json can produce (see phpstan.neon's own bootstrapFiles comment and the README's
+    # "Testing and CI" section).
+    #
+    # Uses the public spryker-shop/b2b-demo-marketplace as that host shop, wired to this checkout via a
+    # composer path-repository — the same install shape this package's own README documents for a real
+    # adopter, just automated. This package also depends on spryker-community/search-index-alias (its
+    # rebuild-target integration plugin implements that package's interface), so that sibling is wired in
+    # as a SECOND path repository, checked out from its own published GitHub repo at its latest tag.
+    #
+    # This package's own Zed Codeception suite is NOT run here — every test in it needs a real MySQL,
+    # OpenSearch/Elasticsearch, AND RabbitMQ all reachable at once (same reasoning as
+    # spryker-community/search-index-alias's own CI, which documents this identically), which a bare
+    # GitHub Actions runner does not provide out of the box. That suite stays a local/manual gate against
+    # the real docker-compose stack (see README); `portable tests` above is what actually runs in CI.
+    name: phpstan (host shop)
+    runs-on: ubuntu-latest
+    env:
+      # Required just to boot the console app / Config bootstrap at all (confirmed empirically:
+      # "Environment variable APPLICATION_ENV must be set" otherwise) — "development" is the standard
+      # lenient Spryker environment; nothing this job runs actually reads environment-specific config.
+      APPLICATION_ENV: development
+      # config_default.php gates `dev:*` console commands (incl. dev:ide-auto-completion:generate)
+      # behind ConsoleConstants::ENABLE_DEVELOPMENT_CONSOLE_COMMANDS, which reads this exact env var —
+      # confirmed empirically ("There are no commands defined in the dev:ide-auto-completion namespace"
+      # without it).
+      DEVELOPMENT_CONSOLE_COMMANDS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: spryker-shop/b2b-demo-marketplace
+          path: shop
+
+      # Nested INSIDE shop/, at the exact relative path this package's own dev environment uses
+      # (packages/spryker-community/<name>) — phpstan.neon/codeception.yml paths and console command
+      # invocations below all assume that layout, matching how a real adopter installs this package.
+      - uses: actions/checkout@v7
+        with:
+          path: shop/packages/spryker-community/search-analyzer-config
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+          # grpc: spryker/opentelemetry (a transitive dependency of this demo shop, unrelated to this
+          # package) requires open-telemetry/transport-grpc, which requires ext-grpc to even resolve via
+          # composer — confirmed empirically (composer require fails at the dependency-resolution step,
+          # before install, without this). Not actually exercised by transfer:generate/phpstan/codecept.
+          extensions: grpc
+
+      - name: Wire this checkout and search-index-alias into the shop as path/VCS repositories
+        working-directory: shop
+        run: |
+          composer config repositories.search-analyzer-config path packages/spryker-community/search-analyzer-config
+          composer config repositories.search-index-alias vcs https://github.com/andrebarthelmeshellmuth/spryker-search-index-alias
+          composer require spryker-community/search-analyzer-config:@dev --no-interaction --no-progress -W
+
+      - name: Generate transfers and IDE auto-completion stubs
+        working-directory: shop
+        run: |
+          vendor/bin/console transfer:generate
+          vendor/bin/console dev:ide-auto-completion:generate
+
+      - name: Propel model build
+        working-directory: shop
+        # Pure schema-file codegen (aggregates every installed package's own schema.xml, then parses it
+        # into Orm\Zed\*\Persistence PHP classes) -- phpstan/Codeception only need those CLASSES to exist,
+        # not a real database. Missing propel:schema:copy fails propel:model:build with "src/Orm/Propel/
+        # Schema directory does not exist" -- confirmed live, matches this package's own sibling
+        # (search-index-alias) which already has this step.
+        run: |
+          vendor/bin/console propel:schema:copy
+          vendor/bin/console propel:model:build
+
+      - name: phpstan
+        working-directory: shop
+        run: vendor/bin/phpstan analyse -c packages/spryker-community/search-analyzer-config/phpstan.neon packages/spryker-community/search-analyzer-config/src/

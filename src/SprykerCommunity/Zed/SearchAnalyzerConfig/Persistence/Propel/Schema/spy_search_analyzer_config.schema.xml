@@ -1,0 +1,97 @@
+<?xml version="1.0"?>
+<database xmlns="spryker:schema-01" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="zed" namespace="Orm\Zed\SearchAnalyzerConfig\Persistence" package="src.Orm.Zed.SearchAnalyzerConfig.Persistence" xsi:schemaLocation="spryker:schema-01 https://static.spryker.com/schema-01.xsd">
+
+    <!--
+        One row per (source_identifier, store_name) scope, the same scoping grain as search-index-alias's
+        own spy_search_index_rollout, since a rebuild always targets exactly one such scope. This table
+        holds INTENT (what the operator has staged); the cluster's live analyzer settings are the source
+        of truth for REALITY. applied_revision/applied_index_name/applied_at record the last time intent
+        and reality were made to match via a search-index-alias rebuild; revision > applied_revision
+        means there are staged, not-yet-applied edits.
+    -->
+    <table name="spy_search_analyzer_config" idMethod="native" identifierQuoting="true">
+        <column name="id_search_analyzer_config" type="INTEGER" required="true" autoIncrement="true" primaryKey="true"/>
+        <column name="source_identifier" type="VARCHAR" size="128" required="true"/>
+        <column name="store_name" type="VARCHAR" size="64" required="true"/>
+
+        <column name="stemmer_language" type="VARCHAR" size="64" required="false" description="An OpenSearch/Elasticsearch stemmer 'language' filter value (e.g. light_german), or null for no stemming."/>
+        <column name="normalization_filter" type="VARCHAR" size="64" required="false" description="An OpenSearch/Elasticsearch normalization filter value (e.g. german_normalization), or null for none."/>
+
+        <column name="stopwords_mode" type="VARCHAR" size="32" required="true" defaultValue="none" description="SearchAnalyzerConfigConfig::STOPWORDS_MODE_* -- none, builtin, or custom (custom rows live in spy_search_analyzer_config_term)."/>
+        <column name="stopwords_builtin_language" type="VARCHAR" size="64" required="false" description="A built-in stopwords list identifier (e.g. _german_), only meaningful when stopwords_mode=builtin."/>
+
+        <column name="decompound_enabled" type="BOOLEAN" required="true" defaultValue="false" description="Whether the dictionary_decompounder filter (word list in spy_search_analyzer_config_term, list_type=decompound_word) is part of this scope's analyzer chain."/>
+
+        <column name="revision" type="INTEGER" required="true" defaultValue="0" description="Current staged revision number. Bumped on every save (config fields or term list). See spy_search_analyzer_config_revision for the full history."/>
+        <column name="applied_revision" type="INTEGER" required="false" description="The revision number a search-index-alias rebuild last actually materialized. Null if never applied."/>
+        <column name="applied_index_name" type="VARCHAR" size="255" required="false" description="The physical index that absorbed applied_revision."/>
+        <column name="applied_at" type="TIMESTAMP" required="false"/>
+
+        <behavior name="timestampable"/>
+        <id-method-parameter value="spy_search_analyzer_config_pk_seq"/>
+
+        <unique name="unique-spy_search_analyzer_config-scope">
+            <unique-column name="source_identifier"/>
+            <unique-column name="store_name"/>
+        </unique>
+    </table>
+
+    <!--
+        Polymorphic per-scope word/term lists. One table for all four list types (rather than four
+        tables) because they share the exact same shape (scope, ordered list of strings) and every
+        consumer (renderer, GUI grid, copy/restore) already has to loop "for each list_type"; four
+        tables would only multiply that loop without adding real structure.
+    -->
+    <table name="spy_search_analyzer_config_term" idMethod="native" identifierQuoting="true">
+        <column name="id_search_analyzer_config_term" type="INTEGER" required="true" autoIncrement="true" primaryKey="true"/>
+        <column name="fk_search_analyzer_config" type="INTEGER" required="true"/>
+        <column name="list_type" type="VARCHAR" size="32" required="true" description="SearchAnalyzerConfigConfig::LIST_TYPE_* -- decompound_word, synonym, stopword, or do_not_decompound."/>
+        <column name="term" type="VARCHAR" size="255" required="true" description="Raw list entry. For synonyms, a single Solr-style line (see README, 'Synonym format')."/>
+        <column name="sort_order" type="INTEGER" required="true" defaultValue="0"/>
+
+        <behavior name="timestampable"/>
+        <id-method-parameter value="spy_search_analyzer_config_term_pk_seq"/>
+
+        <foreign-key name="fk-search_analyzer_config_term-search_analyzer_config" foreignTable="spy_search_analyzer_config" phpName="SearchAnalyzerConfig" refPhpName="SearchAnalyzerConfigTerm" onDelete="CASCADE" onUpdate="CASCADE">
+            <reference local="fk_search_analyzer_config" foreign="id_search_analyzer_config"/>
+        </foreign-key>
+
+        <index name="index-spy_search_analyzer_config_term-scope-type">
+            <index-column name="fk_search_analyzer_config"/>
+            <index-column name="list_type"/>
+        </index>
+    </table>
+
+    <!--
+        Append-only audit/restore trail: every save (manual edit, DE->AT copy, or a restore itself)
+        writes one new row here holding a full JSON snapshot of spy_search_analyzer_config's own columns
+        plus its full term list at that point, so "restore to revision N" is a single row read, not a
+        reconstruction. Deliberately no FK to search-index-alias's spy_search_index_rollout: NOT because
+        of package independence (search-index-alias is a hard composer dependency of this package — see
+        README, "Requirements") but to avoid tying this package's own migrations to search-index-alias's
+        schema evolution (a FK breaks the moment that table/column is ever renamed in a future
+        search-index-alias major version); applied_index_name/applied_at on the parent row are enough to
+        correlate manually if needed.
+    -->
+    <table name="spy_search_analyzer_config_revision" idMethod="native" identifierQuoting="true">
+        <column name="id_search_analyzer_config_revision" type="INTEGER" required="true" autoIncrement="true" primaryKey="true"/>
+        <column name="fk_search_analyzer_config" type="INTEGER" required="true"/>
+        <column name="revision" type="INTEGER" required="true"/>
+        <column name="change_source" type="VARCHAR" size="32" required="true" description="SearchAnalyzerConfigConfig::CHANGE_SOURCE_* -- manual, copy, restore, or import."/>
+        <column name="snapshot" type="LONGVARCHAR" required="true" description="JSON snapshot of the parent row's editable columns plus its full term list, as of this revision."/>
+        <column name="triggered_by_user" type="VARCHAR" size="255" required="false"/>
+
+        <behavior name="timestampable"/>
+        <id-method-parameter value="spy_search_analyzer_config_revision_pk_seq"/>
+
+        <foreign-key name="fk-search_analyzer_config_revision-search_analyzer_config" foreignTable="spy_search_analyzer_config" phpName="SearchAnalyzerConfig" refPhpName="SearchAnalyzerConfigRevision" onDelete="CASCADE" onUpdate="CASCADE">
+            <reference local="fk_search_analyzer_config" foreign="id_search_analyzer_config"/>
+        </foreign-key>
+
+        <unique name="unique-spy_search_analyzer_config_revision-scope-revision">
+            <unique-column name="fk_search_analyzer_config"/>
+            <unique-column name="revision"/>
+        </unique>
+    </table>
+
+</database>

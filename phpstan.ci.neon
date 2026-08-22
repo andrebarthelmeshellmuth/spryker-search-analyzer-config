@@ -1,0 +1,31 @@
+includes:
+    - phpstan.neon
+
+# CI-only variant of phpstan.neon, run via `composer phpstan-ci` (see tests/_ci-standalone for the same
+# standalone-portability pattern the Portable Codeception suite uses). Two categories of class genuinely
+# don't exist outside a real host shop and are excluded rather than faked:
+#
+# - `Generated\{Zed,Yves,Client,Service}\Ide\AutoCompletion` — an aggregate stub across every module in a
+#   real project's full dependency graph, produced by `console dev:ide-auto-completion:generate`. Not
+#   reproducible for one package in isolation.
+# - `Orm\Zed\SearchAnalyzerConfig\Persistence\*` (Propel entity/query/map classes) — produced by
+#   `propel:model:build` against a real schema + database.
+parameters:
+    bootstrapFiles!:
+        - phpstan-ci-bootstrap.php
+    excludePaths:
+        analyse:
+            - src/Generated/*
+    scanDirectories:
+        - src/Generated
+    # Not every category below necessarily fires in this package the way it does in a sibling that
+    # reuses this same file shape — an ignore pattern matching zero errors here is fine, not a sign the
+    # pattern is stale.
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        -
+            message: '#Generated\\(Zed|Yves|Client|Service)\\Ide\\AutoCompletion#'
+        -
+            message: '#Orm\\Zed\\SearchAnalyzerConfig\\#'
+        -
+            identifier: classConstant.phpDocType

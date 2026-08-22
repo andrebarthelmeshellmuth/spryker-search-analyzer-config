@@ -1,0 +1,24 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'Copy ' ~ sourceIdentifier ~ ' / ' ~ storeName %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
+        {% block widget_content %}
+            <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
+            <div class="alert alert-warning">
+                {{ 'This is a HARD OVERRIDE, not a merge: whatever config the target scope currently has (if any) is completely replaced by a copy of this scope\'s config. This does not apply anything -- use "Apply" on the target scope afterward.' | trans }}
+            </div>
+
+            {{ form_start(copyFormView) }}
+                {{ form_widget(copyFormView.sourceIdentifier) }}
+                {{ form_widget(copyFormView.storeName) }}
+                {{ form_row(copyFormView.targetSourceIdentifier) }}
+                {{ form_row(copyFormView.targetStoreName) }}
+                <button type="submit" class="btn btn-outline-danger"
+                    onclick="return confirm('Overwrite the target scope\'s config with a copy of {{ sourceIdentifier }}/{{ storeName }}?');">{{ 'Copy (overwrite target)' | trans }}</button>
+            {{ form_end(copyFormView) }}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}

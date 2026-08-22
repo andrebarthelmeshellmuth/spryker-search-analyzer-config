@@ -1,0 +1,59 @@
+{% extends '@Gui/Layout/layout.twig' %}
+
+{% set widget_title = 'Preview ' ~ sourceIdentifier ~ ' / ' ~ storeName %}
+{% block section_title %}{{ widget_title | trans }}{% endblock %}
+
+{% block content %}
+    {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
+        {% block widget_content %}
+            <p><a href="{{ url('/search-analyzer-config/index', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to overview' | trans | raw }}</a></p>
+            <p>
+                Runs a sample text through the LIVE analyzer chain ("before") and, via a throwaway index
+                created and deleted just for this request, the chain as it would be with the currently
+                STAGED config applied ("after"). No live index is ever touched by this page.
+            </p>
+
+            {% if previewFormView %}
+                {{ form_start(previewFormView) }}
+                    {{ form_widget(previewFormView.sourceIdentifier) }}
+                    {{ form_widget(previewFormView.storeName) }}
+                    {{ form_row(previewFormView.targetAnalyzerName) }}
+                    {{ form_row(previewFormView.inputText) }}
+                    <button type="submit" class="btn btn-primary">{{ 'Preview' | trans }}</button>
+                {{ form_end(previewFormView) }}
+            {% endif %}
+
+            {% if result %}
+                <hr/>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4>{{ 'Before (live)' | trans }}</h4>
+                        {% for stage in result.beforeStages %}
+                            <div style="margin-bottom: 8px;">
+                                <strong>{{ stage.stageName }}</strong><br/>
+                                {% if stage.tokens %}
+                                    {% for token in stage.tokens %}<span class="label label-warning" style="margin-right: 2px;">{{ token }}</span>{% endfor %}
+                                {% else %}
+                                    <span class="text-muted">{{ '(no tokens survive this stage)' | trans }}</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <div class="col-md-6">
+                        <h4>{{ 'After (staged config)' | trans }}</h4>
+                        {% for stage in result.afterStages %}
+                            <div style="margin-bottom: 8px;">
+                                <strong>{{ stage.stageName }}</strong><br/>
+                                {% if stage.tokens %}
+                                    {% for token in stage.tokens %}<span class="label label-info" style="margin-right: 2px;">{{ token }}</span>{% endfor %}
+                                {% else %}
+                                    <span class="text-muted">{{ '(no tokens survive this stage)' | trans }}</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endblock %}
+    {% endembed %}
+{% endblock %}
