@@ -7,7 +7,10 @@
     {% embed '@Gui/Partials/widget.twig' with { widget_title: widget_title } %}
         {% block widget_content %}
             <p><a href="{{ url('/search-analyzer-config/config/edit', { source: sourceIdentifier, store: storeName }) }}">{{ '&larr; Back to edit' | trans | raw }}</a></p>
-            <p>{{ 'This list is shared by the whole' | trans }} <strong>{{ sourceIdentifier }} / {{ storeName }}</strong> {{ 'store/locale scope -- it is NOT specific to any one target analyzer. It only takes effect on an analyzer whose own filter chain references the corresponding slot; see the badges on the Edit page.' | trans }}</p>
+            <p>{{ 'This list is shared by the whole' | trans }} <strong>{{ sourceIdentifier }} / {{ storeName }}</strong> {{ 'store/locale scope -- it is NOT specific to any one target analyzer. It only takes effect on an analyzer whose own filter chain references the' | trans }} <code>{{ slotName }}</code> {{ 'slot; see the badges on the Edit page.' | trans }}</p>
+            {% if listType == 'do_not_decompound' %}
+                <p class="text-muted">{{ 'Despite the name, this list does not require decompounding to be enabled: the underlying' | trans }} <code>sac_keyword_marker</code> {{ 'filter also protects these terms from stemming (needs a stemmer language set), independent of decompounding.' | trans }}</p>
+            {% endif %}
             <p>Saving only STAGES this list -- it does not touch a live index. Use "Apply" on the overview page afterward.</p>
 
             {{ form_start(editListFormView) }}
