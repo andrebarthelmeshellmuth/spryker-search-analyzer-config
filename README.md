@@ -337,6 +337,14 @@ stopword removal don't multiply tokens, so their exact position relative to `sac
 constrained by this mechanism the way synonym filters are — the recommended order is just a sensible
 linguistic default, not itself an OpenSearch requirement.
 
+Stemming is placed **after** synonyms rather than before, even though stemming-first is common ES/Solr
+advice (it lets a synonym rule cover every inflected form with one entry). Deliberately not done here:
+`stemmerLanguage` is one of this package's five independently-editable fields, and synonym rules written
+against stemmed output would silently break if that field is ever changed — a cross-field coupling this
+package's own design otherwise avoids. It also keeps synonym rules typeable by a non-technical Zed
+operator as plain surface words (`sofa, couch`) instead of whatever a specific stemmer algorithm happens
+to output.
+
 This constraint is entirely enforced by OpenSearch itself, not by this package — there is no code here
 that validates or auto-corrects your schema's chain order. The one automated backstop is
 `SearchAnalyzerConfigFacade::save()`, which runs a real create-and-delete probe against the live cluster
