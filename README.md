@@ -17,6 +17,8 @@
 - [How it works](#how-it-works)
   - [Per-analyzer opt-out: not every target analyzer needs every slot](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot)
   - [Filter chain order is your project's responsibility — and why it matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)
+  - [Bootstrapping a brand-new scope's first index (the "greenfield" case)](#bootstrapping-a-brand-new-scopes-first-index-the-greenfield-case)
+  - [The do-not-decompound list is a security boundary, not a nicety](#the-do-not-decompound-list-is-a-security-boundary-not-a-nicety)
 - [Data model](#data-model)
 - [Managing config without a GUI](#managing-config-without-a-gui)
 - [Supported languages](#supported-languages)
@@ -341,6 +343,30 @@ that validates or auto-corrects your schema's chain order. The one automated bac
 (`SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()`) before persisting any config — so a bad
 chain order already declared in your schema fails loudly on Save with OpenSearch's own error message, not
 silently until the next rebuild.
+
+### Bootstrapping a brand-new scope's first index (the "greenfield" case)
+
+Everything above assumes an index already exists for the scope: a `search-index-alias` rebuild works by
+**cloning the currently-live index's settings**, then splicing staged values into the slots that clone
+already contains. A scope that has never had an index built yet has no live settings to clone — the
+rebuild pipeline has nothing to start from.
+
+That very first index isn't created by a rebuild at all. It's created by core Spryker's own
+`search:setup` command, which reads a **static schema JSON file that lives in your project** — a file
+this package neither knows about nor can locate (every project's own layout differs), and one
+`search:setup` never re-reads on later rebuilds. Staging config in the Zed GUI for a scope that doesn't
+have an index yet, then running `search:setup`, does nothing for that config: `search:setup` has no idea
+this package's staged DB rows even exist.
+
+`search-analyzer-config:export-schema <source> <store> <target-analyzer>` is the one-time manual bridge
+for exactly this gap. It renders your already-staged config into the same `analysis` JSON fragment a real
+rebuild's `TargetIndexSettingsExpanderPlugin::expand()` would have produced — but prints it to your
+terminal instead of splicing it into a live index, since there isn't one yet. Paste that fragment into
+your project's own schema JSON by hand, then run `search:setup` for the first time. From that point on,
+the scope has a live index and every future edit goes through the completely normal stage → Apply →
+rebuild → clone path — `export-schema` is never needed again for that scope. It deliberately never writes
+the file itself: assuming a specific schema file's shape or path would break portability to every other
+adopter's own project layout.
 
 ### The do-not-decompound list is a security boundary, not a nicety
 
