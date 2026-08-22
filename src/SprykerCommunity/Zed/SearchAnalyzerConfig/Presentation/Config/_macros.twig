@@ -1,0 +1,15 @@
+{% macro sharedWith(slotAvailability, slotName) %}
+    {% set names = [] %}
+    {% if slotAvailability[slotName] is defined %}
+        {% for analyzerName, referenced in slotAvailability[slotName] %}
+            {% if referenced %}
+                {% set names = names|merge([analyzerName]) %}
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+    {% if names is empty %}
+        <p class="text-muted"><em>{{ 'Not referenced by any target analyzer -- inactive, this value has no effect.' | trans }}</em></p>
+    {% else %}
+        <p class="text-muted">{{ 'Shared value -- applies to:' | trans }} {{ names|join(', ') }}</p>
+    {% endif %}
+{% endmacro %}

@@ -13,7 +13,6 @@ use ArrayObject;
 use Generated\Shared\Transfer\SearchAnalyzerConfigTransfer;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigInvalidTermException;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException;
 
 /**
  * Renders one scope's SearchAnalyzerConfigTransfer into real OpenSearch/Elasticsearch `analysis`
@@ -35,9 +34,12 @@ use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerC
  * shared, index-level `analysis.filter` data -- see below). Since "opted out" and "forgot to declare the
  * slot" look identical from here, collectMissingSlotWarnings() computes the same detection as a NON-fatal
  * warning list, for a caller (the Zed edit form) that wants to flag it and let the user confirm before
- * saving -- see `SearchAnalyzerConfigPreviewer::collectMissingSlotWarnings()`. The one case that DOES still
- * throw `SearchAnalyzerConfigMissingFilterSlotException` is a target analyzer name that isn't declared in
- * the live settings AT ALL (a real typo/config bug in `getTargetAnalyzerNames()` -- nothing to opt out of).
+ * saving -- see `SearchAnalyzerConfigPreviewer::collectMissingSlotWarnings()`.
+ *
+ * WHICH ANALYZERS COUNT AS "TARGETS" IS RESOLVED FROM $baseSettings ITSELF, not from a project-maintained
+ * list -- see resolveTargetAnalyzerNames(). An analyzer whose own chain references none of this package's
+ * well-known slot names simply isn't a target; there is no "analyzer declared but not found" error case
+ * anymore, since a name that was never declared anywhere has nothing to typo.
  *
  * A field left at its default/inactive value (e.g. no custom stopwords) still gets a definitive, empty
  * body written into its slot WHEN THAT SLOT ALREADY EXISTS -- `type: synonym, synonyms: []` and friends
@@ -119,33 +121,74 @@ class SearchAnalyzerConfigRenderer implements SearchAnalyzerConfigRendererInterf
     ];
 
     /**
+     * Pure structural read, independent of any staged/submitted field VALUE -- unlike
+     * collectMissingSlotWarnings(), which only reports a slot missing for a field that's currently
+     * ACTIVE, this reports every chain-visible slot's presence on every target analyzer regardless, so
+     * the Zed edit form can show it up front (before the user has typed anything) rather than only after
+     * a submit.
+     *
+     * @param array<string, mixed> $baseSettings
+     *
+     * @return array<string, array<string, bool>> Slot name => (analyzer name => referenced by that analyzer's own chain).
+     */
+    public function describeSlotAvailability(array $baseSettings): array
+    {
+        $targetAnalyzerNames = $this->resolveTargetAnalyzerNames($baseSettings);
+        $availability = [];
+
+        foreach (static::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER as $slotName) {
+            $availability[$slotName] = [];
+
+            foreach ($targetAnalyzerNames as $targetAnalyzerName) {
+                $chainFilterNames = $baseSettings['analysis']['analyzer'][$targetAnalyzerName]['filter'];
+
+                $availability[$slotName][$targetAnalyzerName] = in_array($slotName, $chainFilterNames, true);
+            }
+        }
+
+        return $availability;
+    }
+
+    /**
+     * @param array<string, mixed> $baseSettings
+     *
+     * @return array<string>
+     */
+    public function resolveTargetAnalyzerNames(array $baseSettings): array
+    {
+        $analyzers = $baseSettings['analysis']['analyzer'] ?? [];
+
+        if (!is_array($analyzers)) {
+            return [];
+        }
+
+        $targetAnalyzerNames = [];
+
+        foreach ($analyzers as $analyzerName => $analyzerSettings) {
+            $chainFilterNames = is_array($analyzerSettings['filter'] ?? null) ? $analyzerSettings['filter'] : [];
+
+            if (array_intersect(static::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER, $chainFilterNames) !== []) {
+                $targetAnalyzerNames[] = (string)$analyzerName;
+            }
+        }
+
+        return $targetAnalyzerNames;
+    }
+
+    /**
      * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
      * @param array<string, mixed> $baseSettings
-     * @param array<string> $targetAnalyzerNames
-     *
-     * @throws \SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException
-     *  Only when a target analyzer name isn't declared in $baseSettings at all -- a real typo/config bug,
-     *  not a per-slot opt-out (see this class's own doc block).
      *
      * @return array<string, mixed>
      */
     public function render(
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
         array $baseSettings,
-        array $targetAnalyzerNames,
     ): array {
         $doNotDecompoundTerms = $this->extractTerms($searchAnalyzerConfigTransfer->getDoNotDecompoundTerms());
         $discardedWarnings = [];
 
-        foreach ($targetAnalyzerNames as $targetAnalyzerName) {
-            if (!$this->analyzerChainExists($baseSettings, $targetAnalyzerName)) {
-                if ($this->hasAnyActiveField($searchAnalyzerConfigTransfer)) {
-                    throw new SearchAnalyzerConfigMissingFilterSlotException([$this->buildAnalyzerNotFoundMessage($targetAnalyzerName)]);
-                }
-
-                continue;
-            }
-
+        foreach ($this->resolveTargetAnalyzerNames($baseSettings) as $targetAnalyzerName) {
             $this->applyAllSlotsForAnalyzer($baseSettings, $targetAnalyzerName, $searchAnalyzerConfigTransfer, $doNotDecompoundTerms, $discardedWarnings);
         }
 
@@ -160,14 +203,12 @@ class SearchAnalyzerConfigRenderer implements SearchAnalyzerConfigRendererInterf
      *
      * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
      * @param array<string, mixed> $baseSettings
-     * @param array<string> $targetAnalyzerNames
      *
      * @return array<string>
      */
     public function collectMissingSlotWarnings(
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
         array $baseSettings,
-        array $targetAnalyzerNames,
     ): array {
         $doNotDecompoundTerms = $this->extractTerms($searchAnalyzerConfigTransfer->getDoNotDecompoundTerms());
         $warnings = [];
@@ -175,40 +216,11 @@ class SearchAnalyzerConfigRenderer implements SearchAnalyzerConfigRendererInterf
         // detection-only method never mutates the caller's real settings.
         $scratchSettings = $baseSettings;
 
-        foreach ($targetAnalyzerNames as $targetAnalyzerName) {
-            if (!$this->analyzerChainExists($scratchSettings, $targetAnalyzerName)) {
-                if ($this->hasAnyActiveField($searchAnalyzerConfigTransfer)) {
-                    $warnings[] = $this->buildAnalyzerNotFoundMessage($targetAnalyzerName);
-                }
-
-                continue;
-            }
-
+        foreach ($this->resolveTargetAnalyzerNames($scratchSettings) as $targetAnalyzerName) {
             $this->applyAllSlotsForAnalyzer($scratchSettings, $targetAnalyzerName, $searchAnalyzerConfigTransfer, $doNotDecompoundTerms, $warnings);
         }
 
         return $warnings;
-    }
-
-    /**
-     * @param array<string, mixed> $baseSettings
-     * @param string $targetAnalyzerName
-     */
-    protected function analyzerChainExists(array $baseSettings, string $targetAnalyzerName): bool
-    {
-        return isset($baseSettings['analysis']['analyzer'][$targetAnalyzerName]['filter'])
-            && is_array($baseSettings['analysis']['analyzer'][$targetAnalyzerName]['filter']);
-    }
-
-    /**
-     * @param string $targetAnalyzerName
-     */
-    protected function buildAnalyzerNotFoundMessage(string $targetAnalyzerName): string
-    {
-        return sprintf(
-            'Target analyzer "%s" was not found in the current settings, but this scope has an active config. Check getTargetAnalyzerNames() for a typo, or that this analyzer is really declared there.',
-            $targetAnalyzerName,
-        );
     }
 
     /**
@@ -231,23 +243,6 @@ class SearchAnalyzerConfigRenderer implements SearchAnalyzerConfigRendererInterf
         $this->applyStopwordsSlot($baseSettings, $targetAnalyzerName, $searchAnalyzerConfigTransfer, $missingSlotMessages);
         $this->applyKeywordMarkerSlot($baseSettings, $targetAnalyzerName, $searchAnalyzerConfigTransfer, $doNotDecompoundTerms, $missingSlotMessages);
         $this->applyStemmerSlot($baseSettings, $targetAnalyzerName, $searchAnalyzerConfigTransfer, $missingSlotMessages);
-    }
-
-    /**
-     * Mirrors the per-slot "is this field active" conditions used throughout apply*Slot() below -- used
-     * only to decide whether a target analyzer that isn't in $baseSettings at all is worth an error (a
-     * scope with nothing active has nothing that could go silently unapplied).
-     *
-     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
-     */
-    protected function hasAnyActiveField(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer): bool
-    {
-        return $searchAnalyzerConfigTransfer->getNormalizationFilter() !== null
-            || $searchAnalyzerConfigTransfer->getStemmerLanguage() !== null
-            || (bool)$searchAnalyzerConfigTransfer->getDecompoundEnabled()
-            || $this->extractTerms($searchAnalyzerConfigTransfer->getSynonyms()) !== []
-            || $this->extractTerms($searchAnalyzerConfigTransfer->getDoNotDecompoundTerms()) !== []
-            || ($searchAnalyzerConfigTransfer->getStopwordsMode() !== null && $searchAnalyzerConfigTransfer->getStopwordsMode() !== SearchAnalyzerConfigConfig::STOPWORDS_MODE_NONE);
     }
 
     /**

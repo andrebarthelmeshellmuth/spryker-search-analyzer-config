@@ -68,6 +68,53 @@ class SearchAnalyzerConfigConfig extends AbstractSharedConfig
     ];
 
     /**
+     * The two list types with NO scalar filter of their own, so no filter page to fold them into --
+     * `LIST_TYPE_DECOMPOUND_WORD`/`LIST_TYPE_STOPWORD` are edited inline on their filter's own page instead
+     * (ConfigController::editFilterAction(), SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT) and have no
+     * standalone list page anymore.
+     *
+     * @var array<string>
+     */
+    public const STANDALONE_LIST_TYPES = [
+        self::LIST_TYPE_SYNONYM,
+        self::LIST_TYPE_DO_NOT_DECOMPOUND,
+    ];
+
+    /**
+     * @var string
+     */
+    public const FILTER_TYPE_STEMMER = 'stemmer';
+
+    /**
+     * @var string
+     */
+    public const FILTER_TYPE_NORMALIZATION = 'normalization';
+
+    /**
+     * @var string
+     */
+    public const FILTER_TYPE_STOPWORDS = 'stopwords';
+
+    /**
+     * @var string
+     */
+    public const FILTER_TYPE_DECOMPOUND = 'decompound';
+
+    /**
+     * The scalar-backed filter rows -- each gets its own small edit page (ConfigController::editFilterAction()).
+     * `sac_keyword_marker` and `sac_synonyms` are NOT here: neither has a scalar value of its own, only a
+     * term list, so their matrix "Edit" link goes straight to the existing list-edit page instead.
+     *
+     * @var array<string>
+     */
+    public const FILTER_TYPES = [
+        self::FILTER_TYPE_STEMMER,
+        self::FILTER_TYPE_NORMALIZATION,
+        self::FILTER_TYPE_STOPWORDS,
+        self::FILTER_TYPE_DECOMPOUND,
+    ];
+
+    /**
      * @var string
      */
     public const CHANGE_SOURCE_MANUAL = 'manual';

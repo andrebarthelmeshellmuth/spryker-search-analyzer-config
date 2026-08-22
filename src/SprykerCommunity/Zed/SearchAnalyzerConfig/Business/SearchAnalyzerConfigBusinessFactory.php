@@ -50,7 +50,6 @@ class SearchAnalyzerConfigBusinessFactory extends AbstractBusinessFactory
         return new SearchAnalyzerConfigPreviewer(
             $this->getRepository(),
             $this->createSearchAnalyzerConfigRenderer(),
-            $this->getConfig(),
             $this->getSearchIndexAliasFacade(),
             $this->createElasticaClientProvider(),
         );

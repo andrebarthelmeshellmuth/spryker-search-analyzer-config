@@ -18,12 +18,11 @@ use Generated\Shared\Transfer\SearchAnalyzerConfigPreviewStageTransfer;
 use Generated\Shared\Transfer\SearchAnalyzerConfigTransfer;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchIndexManagedScopeMatcher;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Client\ElasticaClientProviderInterface;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigScopeNotManagedException;
+use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Renderer\SearchAnalyzerConfigRenderer;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Renderer\SearchAnalyzerConfigRendererInterface;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Dependency\Facade\SearchAnalyzerConfigToSearchIndexAliasFacadeInterface;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Persistence\SearchAnalyzerConfigRepositoryInterface;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use Throwable;
 
 /**
@@ -66,14 +65,12 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
     /**
      * @param \SprykerCommunity\Zed\SearchAnalyzerConfig\Persistence\SearchAnalyzerConfigRepositoryInterface $repository
      * @param \SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Renderer\SearchAnalyzerConfigRendererInterface $renderer
-     * @param \SprykerCommunity\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig $config
      * @param \SprykerCommunity\Zed\SearchAnalyzerConfig\Dependency\Facade\SearchAnalyzerConfigToSearchIndexAliasFacadeInterface $searchIndexAliasFacade
      * @param \SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Client\ElasticaClientProviderInterface $elasticaClientProvider
      */
     public function __construct(
         protected SearchAnalyzerConfigRepositoryInterface $repository,
         protected SearchAnalyzerConfigRendererInterface $renderer,
-        protected SearchAnalyzerConfigConfig $config,
         protected SearchAnalyzerConfigToSearchIndexAliasFacadeInterface $searchIndexAliasFacade,
         protected ElasticaClientProviderInterface $elasticaClientProvider,
     ) {
@@ -129,12 +126,10 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
      * The one remaining HARD gate before persisting: a real create-and-delete probe against the live
      * cluster (only reached once the render actually changes anything) -- catches anything a per-slot
      * check can't know about, e.g. a stemmer language value or synonym rule OpenSearch itself rejects, or
-     * a chain-order mistake that makes index creation fail outright. A target analyzer name that isn't
-     * declared in the live settings AT ALL still throws SearchAnalyzerConfigMissingFilterSlotException here
-     * too (a real typo/config bug, not a per-slot opt-out) -- see SearchAnalyzerConfigRenderer's own class
-     * doc block. A field with an active value whose slot simply isn't referenced by one target analyzer is
-     * NOT checked here anymore -- that's collectMissingSlotWarnings()'s job, a non-fatal, pre-save warning
-     * the caller can let the user confirm past.
+     * a chain-order mistake that makes index creation fail outright. A field with an active value whose
+     * slot simply isn't referenced by one target analyzer is NOT checked here -- that's
+     * collectMissingSlotWarnings()'s job, a non-fatal, pre-save warning the caller can let the user confirm
+     * past.
      *
      * @param string $sourceIdentifier
      * @param string $storeName
@@ -147,12 +142,6 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
     ): array {
-        $targetAnalyzerNames = $this->config->getTargetAnalyzerNames();
-
-        if ($targetAnalyzerNames === []) {
-            return [];
-        }
-
         try {
             $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
         } catch (SearchAnalyzerConfigScopeNotManagedException) {
@@ -177,11 +166,7 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
             return [];
         }
 
-        try {
-            $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings, $targetAnalyzerNames);
-        } catch (SearchAnalyzerConfigMissingFilterSlotException $searchAnalyzerConfigMissingFilterSlotException) {
-            return $searchAnalyzerConfigMissingFilterSlotException->getMissingSlotMessages();
-        }
+        $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         if ($afterSettings === $baseSettings) {
             return [];
@@ -209,12 +194,6 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
     ): array {
-        $targetAnalyzerNames = $this->config->getTargetAnalyzerNames();
-
-        if ($targetAnalyzerNames === []) {
-            return [];
-        }
-
         try {
             $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
         } catch (SearchAnalyzerConfigScopeNotManagedException) {
@@ -227,7 +206,110 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
             return [];
         }
 
-        return $this->renderer->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, $targetAnalyzerNames);
+        return $this->renderer->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings);
+    }
+
+    /**
+     * Pure structural read for the Zed edit form to show UP FRONT, independent of any field's current
+     * value -- unlike collectMissingSlotWarnings(), which only reports a slot missing for a field that's
+     * currently active. Fails open (empty array) for an unmanaged scope or a cluster hiccup, exactly like
+     * the other two live-cluster reads on this class.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string, array<string, bool>> Slot name => (analyzer name => referenced by that analyzer's own chain).
+     */
+    public function describeSlotAvailability(string $sourceIdentifier, string $storeName): array
+    {
+        try {
+            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
+        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+            return [];
+        }
+
+        try {
+            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
+        } catch (ElasticaExceptionInterface) {
+            return [];
+        }
+
+        return $this->renderer->describeSlotAvailability($baseSettings);
+    }
+
+    /**
+     * Which of this package's well-known slots would actually change on the LIVE cluster if
+     * $searchAnalyzerConfigTransfer were applied right now -- renders it against the real live settings
+     * (same mechanism `validateAgainstLiveCluster()` uses) and diffs the resulting filter body per slot
+     * against what's live today. Deliberately NOT based on `applied_revision`/revision history: this
+     * package has no rollout-completion hook to reliably know when (or whether) a requested rebuild ever
+     * finished, so a revision-based diff can go stale or never activate at all. Comparing actual rendered
+     * filter bodies is always accurate and needs nothing to have been formally "applied" first -- a
+     * scope that's never been through Apply still gets a correct diff against its real live analyzer.
+     * Fails open (every slot false) for an unmanaged scope or a cluster hiccup, exactly like the other
+     * live-cluster reads on this class.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string, bool> Slot name => whether rendering $searchAnalyzerConfigTransfer would change that slot's live filter body.
+     */
+    public function describeEditedSlots(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array {
+        $editedSlots = array_fill_keys(SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER, false);
+
+        try {
+            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
+        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+            return $editedSlots;
+        }
+
+        try {
+            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
+        } catch (ElasticaExceptionInterface) {
+            return $editedSlots;
+        }
+
+        $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings);
+
+        foreach (array_keys($editedSlots) as $slotName) {
+            $liveBody = $baseSettings['analysis']['filter'][$slotName] ?? null;
+            $stagedBody = $afterSettings['analysis']['filter'][$slotName] ?? null;
+            $editedSlots[$slotName] = $liveBody !== $stagedBody;
+        }
+
+        return $editedSlots;
+    }
+
+    /**
+     * Analyzer names for the Zed edit/preview forms -- see SearchAnalyzerConfigRendererInterface::resolveTargetAnalyzerNames()
+     * for the discovery rule. Fails open (empty array) for an unmanaged scope or a cluster hiccup, exactly
+     * like the other live-cluster reads on this class.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string>
+     */
+    public function getManagedAnalyzerNames(string $sourceIdentifier, string $storeName): array
+    {
+        try {
+            $aliasName = $this->resolveAliasName($sourceIdentifier, $storeName);
+        } catch (SearchAnalyzerConfigScopeNotManagedException) {
+            return [];
+        }
+
+        try {
+            $baseSettings = $this->readLiveAnalysisSettings($this->elasticaClientProvider->getClient(), $aliasName);
+        } catch (ElasticaExceptionInterface) {
+            return [];
+        }
+
+        return $this->renderer->resolveTargetAnalyzerNames($baseSettings);
     }
 
     /**
@@ -309,7 +391,7 @@ class SearchAnalyzerConfigPreviewer implements SearchAnalyzerConfigPreviewerInte
         }
 
         $baseSettings = $this->readLiveAnalysisSettings($elasticaClient, $aliasName);
-        $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings, [$targetAnalyzerName]);
+        $afterSettings = $this->renderer->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         if ($afterSettings === $baseSettings) {
             return $beforeStages;

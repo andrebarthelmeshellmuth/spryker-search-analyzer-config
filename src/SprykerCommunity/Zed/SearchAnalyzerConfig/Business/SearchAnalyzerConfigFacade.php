@@ -16,7 +16,6 @@ use Spryker\Zed\Kernel\Business\AbstractFacade;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchIndexManagedScopeMatcher;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigInvalidTermException;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException;
 
 /**
  * @method \SprykerCommunity\Zed\SearchAnalyzerConfig\Business\SearchAnalyzerConfigBusinessFactory getFactory()
@@ -129,17 +128,15 @@ class SearchAnalyzerConfigFacade extends AbstractFacade implements SearchAnalyze
             return $baseSettings;
         }
 
-        $targetAnalyzerNames = $this->getFactory()->getConfig()->getTargetAnalyzerNames();
-
         try {
             return $this->getFactory()
                 ->createSearchAnalyzerConfigRenderer()
-                ->render($searchAnalyzerConfigTransfer, $baseSettings, $targetAnalyzerNames);
-        } catch (SearchAnalyzerConfigMissingFilterSlotException | SearchAnalyzerConfigInvalidTermException) {
+                ->render($searchAnalyzerConfigTransfer, $baseSettings);
+        } catch (SearchAnalyzerConfigInvalidTermException) {
             // Called from the real async search-index-alias rebuild worker -- a scope whose staged config
-            // no longer renders (e.g. the project schema dropped a slot after this config was saved) must
-            // not crash the whole rebuild. Save-time validation is the primary safety net; this is the
-            // fallback for a config that went stale after it was already saved.
+            // no longer renders (e.g. an invalid do-not-decompound term slipped past save-time validation)
+            // must not crash the whole rebuild. Save-time validation is the primary safety net; this is
+            // the fallback for a config that went stale after it was already saved.
             return $baseSettings;
         }
     }
@@ -250,15 +247,20 @@ class SearchAnalyzerConfigFacade extends AbstractFacade implements SearchAnalyze
         $searchIndexRolloutTransfer = $this->getFactory()->getSearchIndexAliasFacade()->requestRebuildAsync($searchIndexScopeTransfer, $triggeredByUser);
 
         $searchAnalyzerConfigTransfer = $this->getRepository()->findByScope($sourceIdentifier, $storeName);
+        $targetIndexName = $searchIndexRolloutTransfer->getTargetIndexName();
 
-        if ($searchAnalyzerConfigTransfer !== null) {
+        // A rollout that failed before a target index was even created (e.g. "scope has no live index
+        // yet -- use adoption, not a rebuild, for first-time setup", see RolloutStarter's own doc block)
+        // has no target index to mark applied against -- its own failure reason, carried on
+        // $searchIndexRolloutTransfer, is what the caller (the Zed Apply button) should surface instead.
+        if ($searchAnalyzerConfigTransfer !== null && $targetIndexName !== null) {
             // Records "a rebuild was requested for this revision", not "the rollout finished/flipped" --
             // search-index-alias exposes no rollout-completion hook this package could listen to instead.
             $this->getEntityManager()->markApplied(
                 $sourceIdentifier,
                 $storeName,
                 $searchAnalyzerConfigTransfer->getRevisionOrFail(),
-                $searchIndexRolloutTransfer->getTargetIndexNameOrFail(),
+                $targetIndexName,
             );
         }
 
@@ -295,6 +297,78 @@ class SearchAnalyzerConfigFacade extends AbstractFacade implements SearchAnalyze
                 $searchAnalyzerConfigTransfer->getStoreNameOrFail(),
                 $searchAnalyzerConfigTransfer,
             );
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string, array<string, bool>>
+     */
+    public function describeSlotAvailability(string $sourceIdentifier, string $storeName): array
+    {
+        return $this->getFactory()
+            ->createSearchAnalyzerConfigPreviewer()
+            ->describeSlotAvailability($sourceIdentifier, $storeName);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string>
+     */
+    public function getManagedAnalyzerNames(string $sourceIdentifier, string $storeName): array
+    {
+        return $this->getFactory()
+            ->createSearchAnalyzerConfigPreviewer()
+            ->getManagedAnalyzerNames($sourceIdentifier, $storeName);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     */
+    public function findAppliedSnapshot(string $sourceIdentifier, string $storeName): ?SearchAnalyzerConfigTransfer
+    {
+        $appliedRevision = $this->getRepository()->findByScope($sourceIdentifier, $storeName)?->getAppliedRevision();
+
+        if ($appliedRevision === null) {
+            return null;
+        }
+
+        return $this->findRevisionSnapshot($sourceIdentifier, $storeName, $appliedRevision);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     */
+    public function describeEditedSlots(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array {
+        return $this->getFactory()
+            ->createSearchAnalyzerConfigPreviewer()
+            ->describeEditedSlots($sourceIdentifier, $storeName, $searchAnalyzerConfigTransfer);
     }
 
     /**

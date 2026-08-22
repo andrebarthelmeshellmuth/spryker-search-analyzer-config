@@ -60,4 +60,43 @@ abstract class AbstractScopeController extends AbstractController
     {
         return sprintf('/search-analyzer-config/index?source=%s&store=%s', urlencode($sourceIdentifier), urlencode($storeName));
     }
+
+    /**
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     */
+    protected function buildEditUrl(string $sourceIdentifier, string $storeName): string
+    {
+        return sprintf('/search-analyzer-config/config/edit?source=%s&store=%s', urlencode($sourceIdentifier), urlencode($storeName));
+    }
+
+    /**
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param string $listType One of SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig::LIST_TYPES.
+     */
+    protected function buildEditListUrl(string $sourceIdentifier, string $storeName, string $listType): string
+    {
+        return sprintf(
+            '/search-analyzer-config/config/edit-list?source=%s&store=%s&list=%s',
+            urlencode($sourceIdentifier),
+            urlencode($storeName),
+            urlencode($listType),
+        );
+    }
+
+    /**
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param string $filterType One of SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig::FILTER_TYPES.
+     */
+    protected function buildEditFilterUrl(string $sourceIdentifier, string $storeName, string $filterType): string
+    {
+        return sprintf(
+            '/search-analyzer-config/config/edit-filter?source=%s&store=%s&filter=%s',
+            urlencode($sourceIdentifier),
+            urlencode($storeName),
+            urlencode($filterType),
+        );
+    }
 }

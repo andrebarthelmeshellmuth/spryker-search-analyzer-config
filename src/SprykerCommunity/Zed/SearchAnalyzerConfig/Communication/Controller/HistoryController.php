@@ -79,11 +79,16 @@ class HistoryController extends AbstractScopeController
         $storeName = $formData[SearchAnalyzerConfigRestoreForm::FIELD_STORE_NAME];
         $revision = (int)$formData[SearchAnalyzerConfigRestoreForm::FIELD_REVISION];
         $historyUrl = sprintf('/search-analyzer-config/history/index?source=%s&store=%s', urlencode($sourceIdentifier), urlencode($storeName));
+        /** @var string $requestedRedirectTo */
+        $requestedRedirectTo = $formData[SearchAnalyzerConfigRestoreForm::FIELD_REDIRECT_TO] ?? '';
+        // Empty (History's own Restore buttons never set it) means "redirect back to History" -- otherwise
+        // the caller (e.g. the Edit page's "Reset changes" button) picked its own safe redirect target.
+        $redirectUrl = $requestedRedirectTo !== '' ? $this->resolveRedirectUrl($requestedRedirectTo) : $historyUrl;
 
         if ($this->findManagedScope($sourceIdentifier, $storeName) === null) {
             $this->addErrorMessage(sprintf('"%s" / "%s" is not a search-index-alias managed scope.', $sourceIdentifier, $storeName));
 
-            return $this->redirectResponse($historyUrl);
+            return $this->redirectResponse($redirectUrl);
         }
 
         try {
@@ -91,7 +96,7 @@ class HistoryController extends AbstractScopeController
         } catch (Throwable $throwable) {
             $this->addErrorMessage(sprintf('Restore failed: %s', $throwable->getMessage()));
 
-            return $this->redirectResponse($historyUrl);
+            return $this->redirectResponse($redirectUrl);
         }
 
         if ($errors !== []) {
@@ -99,11 +104,11 @@ class HistoryController extends AbstractScopeController
                 $this->addErrorMessage($error);
             }
 
-            return $this->redirectResponse($historyUrl);
+            return $this->redirectResponse($redirectUrl);
         }
 
         $this->addSuccessMessage(sprintf('Revision %d restored as a new revision. It is NOT live yet -- use "Apply" on the Overview page to trigger a rebuild.', $revision));
 
-        return $this->redirectResponse($historyUrl);
+        return $this->redirectResponse($redirectUrl);
     }
 }

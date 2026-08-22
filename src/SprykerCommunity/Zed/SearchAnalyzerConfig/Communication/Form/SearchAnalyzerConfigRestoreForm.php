@@ -32,6 +32,17 @@ class SearchAnalyzerConfigRestoreForm extends AbstractType
     public const FIELD_REVISION = 'revision';
 
     /**
+     * Empty (the default) means "redirect back to History" -- History's own Restore buttons never set
+     * this. The Edit page's "Reset changes" button (same form, same restoreAction(), just aimed at
+     * `appliedRevision` instead of a user-picked row) sets it back to the Edit page instead, via the same
+     * AbstractScopeController::resolveRedirectUrl() safety check SearchAnalyzerConfigScopeForm's own
+     * redirectTo already uses.
+     *
+     * @var string
+     */
+    public const FIELD_REDIRECT_TO = 'redirectTo';
+
+    /**
      * @param \Symfony\Component\Form\FormBuilderInterface $builder
      * @param array<string, mixed> $options
      */
@@ -47,6 +58,9 @@ class SearchAnalyzerConfigRestoreForm extends AbstractType
         ]);
         $builder->add(static::FIELD_REVISION, HiddenType::class, [
             'constraints' => [new NotBlank()],
+        ]);
+        $builder->add(static::FIELD_REDIRECT_TO, HiddenType::class, [
+            'required' => false,
         ]);
     }
 

@@ -20,17 +20,23 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\NotBlank;
 
 /**
- * The five independently-editable fields (see [[search_analyzer_config_plan]]'s locked-in "five
- * independent fields, not a single Language selector" decision), plus the four term lists. Term lists are
- * plain multi-line textareas here (one term per line) rather than the transfer's own
- * `ArrayObject<SearchAnalyzerConfigTermTransfer>` shape -- the controller converts between the two on
- * load/submit, which keeps this form free of a custom data transformer for what is, in the GUI, just a
- * list of strings.
+ * The five independently-editable SCALAR fields (see [[search_analyzer_config_plan]]'s locked-in "five
+ * independent fields, not a single Language selector" decision), plus FIELD_LIST_TEXT for the ONE term
+ * list that belongs to whichever scalar filter this form instance is built for (stopwords/decompound only
+ * -- synonyms and do-not-decompound have no scalar counterpart at all, so they stay on
+ * SearchAnalyzerConfigEditListForm's own dedicated screen instead).
  *
- * `stemmerLanguageChoices`/`normalizationFilterChoices`/`stopwordsBuiltinLanguageChoices` are threaded in
- * as form options (built from `SearchAnalyzerConfigConfig::getAllowed*()` by the CommunicationFactory)
- * rather than read from a hardcoded list here, so a project's own config override is reflected without
- * touching this class.
+ * Each scalar field gets its own small edit page (ConfigController::editFilterAction(), one per
+ * `SearchAnalyzerConfigConfig::FILTER_TYPES` entry) rather than one combined page -- OPTION_FIELDS lets a
+ * single reusable form class build with only the field(s) relevant to one filter row (stemmer:
+ * FIELD_STEMMER_LANGUAGE alone; stopwords: FIELD_STOPWORDS_MODE + FIELD_STOPWORDS_BUILTIN_LANGUAGE +
+ * FIELD_LIST_TEXT together, since a user edits all three as one decision), instead of four near-identical
+ * form classes.
+ *
+ * `stemmerLanguageChoices`/`normalizationFilterChoices`/`stopwordsBuiltinLanguageChoices`/`listTextLabel`
+ * are threaded in as form options (built from `SearchAnalyzerConfigConfig::getAllowed*()` by the
+ * CommunicationFactory) rather than read from a hardcoded list here, so a project's own config override is
+ * reflected without touching this class.
  */
 class SearchAnalyzerConfigEditForm extends AbstractType
 {
@@ -67,27 +73,18 @@ class SearchAnalyzerConfigEditForm extends AbstractType
     /**
      * @var string
      */
-    public const FIELD_STOPWORDS_CUSTOM_TEXT = 'stopwordsCustomText';
-
-    /**
-     * @var string
-     */
     public const FIELD_DECOMPOUND_ENABLED = 'decompoundEnabled';
 
     /**
+     * The one term list belonging to whichever filter this form instance is built for (stopwords ->
+     * custom stopword list, decompound -> decompound word list) -- added only when that filter's own
+     * OPTION_FIELDS includes it, so its own small page can save the scalar field AND its list together in
+     * one submit, exactly like the synonym/do-not-decompound rows already are one page with nothing else
+     * to combine it with.
+     *
      * @var string
      */
-    public const FIELD_DECOMPOUND_WORDS_TEXT = 'decompoundWordsText';
-
-    /**
-     * @var string
-     */
-    public const FIELD_DO_NOT_DECOMPOUND_TERMS_TEXT = 'doNotDecompoundTermsText';
-
-    /**
-     * @var string
-     */
-    public const FIELD_SYNONYMS_TEXT = 'synonymsText';
+    public const FIELD_LIST_TEXT = 'listText';
 
     /**
      * Set only by the "Save anyway" button rendered alongside a missing-slot warning banner -- tells
@@ -114,6 +111,21 @@ class SearchAnalyzerConfigEditForm extends AbstractType
     public const OPTION_STOPWORDS_BUILTIN_LANGUAGE_CHOICES = 'stopwordsBuiltinLanguageChoices';
 
     /**
+     * Label for FIELD_LIST_TEXT -- differs per filter (custom stopwords vs. decompound words), so it's
+     * threaded in rather than hardcoded here, same reasoning as the *_CHOICES options above.
+     *
+     * @var string
+     */
+    public const OPTION_LIST_TEXT_LABEL = 'listTextLabel';
+
+    /**
+     * Which of the FIELD_* constants above to actually add -- see this class's own doc block.
+     *
+     * @var string
+     */
+    public const OPTION_FIELDS = 'fields';
+
+    /**
      * @param \Symfony\Component\OptionsResolver\OptionsResolver $resolver
      */
     public function configureOptions(OptionsResolver $resolver): void
@@ -124,11 +136,21 @@ class SearchAnalyzerConfigEditForm extends AbstractType
             static::OPTION_STEMMER_LANGUAGE_CHOICES,
             static::OPTION_NORMALIZATION_FILTER_CHOICES,
             static::OPTION_STOPWORDS_BUILTIN_LANGUAGE_CHOICES,
+            static::OPTION_LIST_TEXT_LABEL,
+            static::OPTION_FIELDS,
         ]);
         $resolver->setDefaults([
             static::OPTION_STEMMER_LANGUAGE_CHOICES => [],
             static::OPTION_NORMALIZATION_FILTER_CHOICES => [],
             static::OPTION_STOPWORDS_BUILTIN_LANGUAGE_CHOICES => [],
+            static::OPTION_LIST_TEXT_LABEL => 'Terms (one per line)',
+            static::OPTION_FIELDS => [
+                static::FIELD_STEMMER_LANGUAGE,
+                static::FIELD_NORMALIZATION_FILTER,
+                static::FIELD_STOPWORDS_MODE,
+                static::FIELD_STOPWORDS_BUILTIN_LANGUAGE,
+                static::FIELD_DECOMPOUND_ENABLED,
+            ],
         ]);
     }
 
@@ -150,52 +172,58 @@ class SearchAnalyzerConfigEditForm extends AbstractType
             'data' => '',
         ]);
 
-        $builder->add(static::FIELD_STEMMER_LANGUAGE, ChoiceType::class, [
-            'label' => 'Stemmer language',
-            'choices' => array_flip((array)$options[static::OPTION_STEMMER_LANGUAGE_CHOICES]),
-            'required' => false,
-        ]);
-        $builder->add(static::FIELD_NORMALIZATION_FILTER, ChoiceType::class, [
-            'label' => 'Normalization filter',
-            'choices' => array_flip((array)$options[static::OPTION_NORMALIZATION_FILTER_CHOICES]),
-            'required' => false,
-        ]);
+        /** @var array<string> $fields */
+        $fields = $options[static::OPTION_FIELDS];
 
-        $builder->add(static::FIELD_STOPWORDS_MODE, ChoiceType::class, [
-            'label' => 'Stopwords mode',
-            'choices' => [
-                'None' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_NONE,
-                'Built-in language' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_BUILTIN,
-                'Custom list' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_CUSTOM,
-            ],
-            'expanded' => true,
-        ]);
-        $builder->add(static::FIELD_STOPWORDS_BUILTIN_LANGUAGE, ChoiceType::class, [
-            'label' => 'Built-in stopwords language',
-            'choices' => array_flip((array)$options[static::OPTION_STOPWORDS_BUILTIN_LANGUAGE_CHOICES]),
-            'required' => false,
-        ]);
-        $builder->add(static::FIELD_STOPWORDS_CUSTOM_TEXT, TextareaType::class, [
-            'label' => 'Custom stopwords (one per line)',
-            'required' => false,
-        ]);
+        if (in_array(static::FIELD_STEMMER_LANGUAGE, $fields, true)) {
+            $builder->add(static::FIELD_STEMMER_LANGUAGE, ChoiceType::class, [
+                'label' => 'Stemmer language',
+                'choices' => array_flip((array)$options[static::OPTION_STEMMER_LANGUAGE_CHOICES]),
+                'required' => false,
+            ]);
+        }
 
-        $builder->add(static::FIELD_DECOMPOUND_ENABLED, CheckboxType::class, [
-            'label' => 'Enable decompounding',
-            'required' => false,
-        ]);
-        $builder->add(static::FIELD_DECOMPOUND_WORDS_TEXT, TextareaType::class, [
-            'label' => 'Decompound word list (one per line)',
-            'required' => false,
-        ]);
-        $builder->add(static::FIELD_DO_NOT_DECOMPOUND_TERMS_TEXT, TextareaType::class, [
-            'label' => 'Do-not-decompound / brand terms (one per line)',
-            'required' => false,
-        ]);
-        $builder->add(static::FIELD_SYNONYMS_TEXT, TextareaType::class, [
-            'label' => 'Synonyms, Solr-style, one rule per line (equivalent: "sofa, couch"; directional: "tv => television")',
-            'required' => false,
-        ]);
+        if (in_array(static::FIELD_NORMALIZATION_FILTER, $fields, true)) {
+            $builder->add(static::FIELD_NORMALIZATION_FILTER, ChoiceType::class, [
+                'label' => 'Normalization filter',
+                'choices' => array_flip((array)$options[static::OPTION_NORMALIZATION_FILTER_CHOICES]),
+                'required' => false,
+            ]);
+        }
+
+        if (in_array(static::FIELD_STOPWORDS_MODE, $fields, true)) {
+            $builder->add(static::FIELD_STOPWORDS_MODE, ChoiceType::class, [
+                'label' => 'Stopwords mode',
+                'choices' => [
+                    'None' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_NONE,
+                    'Built-in language' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_BUILTIN,
+                    'Custom list' => SearchAnalyzerConfigConfig::STOPWORDS_MODE_CUSTOM,
+                ],
+                'expanded' => true,
+            ]);
+        }
+
+        if (in_array(static::FIELD_STOPWORDS_BUILTIN_LANGUAGE, $fields, true)) {
+            $builder->add(static::FIELD_STOPWORDS_BUILTIN_LANGUAGE, ChoiceType::class, [
+                'label' => 'Built-in stopwords language',
+                'choices' => array_flip((array)$options[static::OPTION_STOPWORDS_BUILTIN_LANGUAGE_CHOICES]),
+                'required' => false,
+            ]);
+        }
+
+        if (in_array(static::FIELD_DECOMPOUND_ENABLED, $fields, true)) {
+            $builder->add(static::FIELD_DECOMPOUND_ENABLED, CheckboxType::class, [
+                'label' => 'Enable decompounding',
+                'required' => false,
+            ]);
+        }
+
+        if (in_array(static::FIELD_LIST_TEXT, $fields, true)) {
+            $builder->add(static::FIELD_LIST_TEXT, TextareaType::class, [
+                'label' => (string)$options[static::OPTION_LIST_TEXT_LABEL],
+                'required' => false,
+            ]);
+        }
     }
 
     public function getBlockPrefix(): string

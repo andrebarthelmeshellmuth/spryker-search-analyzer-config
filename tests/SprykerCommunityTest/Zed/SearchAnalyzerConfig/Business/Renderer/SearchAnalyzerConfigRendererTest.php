@@ -15,7 +15,6 @@ use Generated\Shared\Transfer\SearchAnalyzerConfigTermTransfer;
 use Generated\Shared\Transfer\SearchAnalyzerConfigTransfer;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigInvalidTermException;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Renderer\SearchAnalyzerConfigRenderer;
 
 /**
@@ -54,33 +53,131 @@ class SearchAnalyzerConfigRendererTest extends Unit
         ],
     ];
 
+    public function testResolveTargetAnalyzerNamesDiscoversAnAnalyzerReferencingAtLeastOneSlot(): void
+    {
+        $this->assertSame(
+            ['fulltext_search_analyzer'],
+            (new SearchAnalyzerConfigRenderer())->resolveTargetAnalyzerNames(static::FULLY_SLOTTED_BASE_SETTINGS),
+        );
+    }
+
+    /**
+     * An analyzer whose own chain references none of this package's well-known slot names is not a
+     * target -- nobody names a filter "sac_stemmer" by accident, so the absence of any such name is a real
+     * signal, not something worth guessing about.
+     */
+    public function testResolveTargetAnalyzerNamesExcludesAnAnalyzerReferencingNoKnownSlot(): void
+    {
+        $baseSettings = [
+            'analysis' => [
+                'analyzer' => [
+                    'unrelated_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase', 'some_other_filter'],
+                    ],
+                ],
+            ],
+        ];
+
+        $this->assertSame([], (new SearchAnalyzerConfigRenderer())->resolveTargetAnalyzerNames($baseSettings));
+    }
+
+    /**
+     * Greenfield case: no live index yet (or a $baseSettings shape that carries no analyzer map at all)
+     * resolves to an empty target list, not an error.
+     */
+    public function testResolveTargetAnalyzerNamesReturnsEmptyForEmptyBaseSettings(): void
+    {
+        $this->assertSame([], (new SearchAnalyzerConfigRenderer())->resolveTargetAnalyzerNames([]));
+    }
+
+    public function testDescribeSlotAvailabilityReportsEveryChainVisibleSlotPerAnalyzer(): void
+    {
+        $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
+
+        $availability = (new SearchAnalyzerConfigRenderer())->describeSlotAvailability($baseSettings);
+
+        $this->assertSame(
+            SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER,
+            array_keys($availability),
+        );
+        $this->assertTrue($availability['sac_synonyms']['fulltext_search_analyzer']);
+        $this->assertTrue($availability['sac_decompound']['fulltext_search_analyzer']);
+    }
+
+    public function testDescribeSlotAvailabilityReportsFalseForAnUnreferencedSlot(): void
+    {
+        $baseSettings = [
+            'analysis' => [
+                'analyzer' => [
+                    'fulltext_search_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase', 'sac_synonyms'],
+                    ],
+                ],
+            ],
+        ];
+
+        $availability = (new SearchAnalyzerConfigRenderer())->describeSlotAvailability($baseSettings);
+
+        $this->assertTrue($availability['sac_synonyms']['fulltext_search_analyzer']);
+        $this->assertFalse($availability['sac_decompound']['fulltext_search_analyzer']);
+    }
+
+    public function testDescribeSlotAvailabilityDiffersPerAnalyzerAndNeverThrows(): void
+    {
+        $baseSettings = [
+            'analysis' => [
+                'analyzer' => [
+                    'fulltext_index_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase', 'sac_decompound'],
+                    ],
+                    'fulltext_search_analyzer' => [
+                        'tokenizer' => 'standard',
+                        'filter' => ['lowercase', 'sac_synonyms'],
+                    ],
+                ],
+            ],
+        ];
+
+        $availability = (new SearchAnalyzerConfigRenderer())->describeSlotAvailability($baseSettings);
+
+        $this->assertTrue($availability['sac_decompound']['fulltext_index_analyzer']);
+        $this->assertFalse($availability['sac_decompound']['fulltext_search_analyzer']);
+    }
+
+    /**
+     * An analyzer referencing no known slot at all isn't discovered, so it never appears in the
+     * per-slot availability map either -- describeSlotAvailability() simply has nothing to report for it.
+     */
+    public function testDescribeSlotAvailabilityOmitsAnAnalyzerReferencingNoKnownSlot(): void
+    {
+        $availability = (new SearchAnalyzerConfigRenderer())->describeSlotAvailability([]);
+
+        foreach (SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER as $slotName) {
+            $this->assertSame([], $availability[$slotName]);
+        }
+    }
+
     public function testEmptyConfigReturnsBaseSettingsUnchanged(): void
     {
         $searchAnalyzerConfigTransfer = new SearchAnalyzerConfigTransfer();
         $baseSettings = ['number_of_shards' => '1'];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertSame($baseSettings, $result);
     }
 
-    public function testAnalyzerNameNotPresentInBaseSettingsIsSkippedWithoutErrorWhenNothingIsActive(): void
-    {
-        $searchAnalyzerConfigTransfer = new SearchAnalyzerConfigTransfer();
-
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, [], ['nonexistent_analyzer']);
-
-        $this->assertArrayNotHasKey('nonexistent_analyzer', $result['analysis']['analyzer'] ?? []);
-    }
-
-    public function testAnalyzerNameNotPresentInBaseSettingsThrowsWhenAFieldIsActive(): void
+    public function testEmptyBaseSettingsAreReturnedUnchangedEvenWhenAFieldIsActive(): void
     {
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setStemmerLanguage('light_german');
 
-        $this->expectException(SearchAnalyzerConfigMissingFilterSlotException::class);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, []);
 
-        (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, [], ['nonexistent_analyzer']);
+        $this->assertSame([], $result);
     }
 
     public function testNeverAddsAFilterNameToTheAnalyzersOwnFilterChainOrChangesItsOrder(): void
@@ -91,7 +188,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
         $originalChain = $baseSettings['analysis']['analyzer']['fulltext_search_analyzer']['filter'];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertSame($originalChain, $result['analysis']['analyzer']['fulltext_search_analyzer']['filter']);
     }
@@ -101,7 +198,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setStemmerLanguage('light_german');
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'stemmer', 'language' => 'light_german'],
@@ -114,7 +211,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
         $baseSettings['analysis']['filter']['sac_stemmer'] = ['type' => 'stemmer', 'language' => 'project_default'];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings);
 
         $this->assertSame(
             ['type' => 'stemmer', 'language' => 'project_default'],
@@ -126,7 +223,8 @@ class SearchAnalyzerConfigRendererTest extends Unit
      * A missing slot on an analyzer that DOES exist is a deliberate per-analyzer opt-out now, not an
      * error -- render() simply skips that field for that analyzer. See
      * testActiveStemmerLanguageWithoutAReferencedSlotWarnsButDoesNotThrow() for the same case surfaced as
-     * a non-fatal warning via collectMissingSlotWarnings().
+     * a non-fatal warning via collectMissingSlotWarnings(). The chain still needs at least ONE unrelated
+     * known slot (sac_synonyms here) so the analyzer is auto-discovered as a target at all.
      */
     public function testActiveStemmerLanguageWithoutAReferencedSlotIsSkippedWithoutThrowing(): void
     {
@@ -138,13 +236,13 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertArrayNotHasKey('sac_stemmer', $result['analysis']['filter'] ?? []);
     }
@@ -159,18 +257,18 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertCount(1, $warnings);
         $this->assertStringContainsString('sac_stemmer', $warnings[0]);
         // Must not have mutated the caller's settings.
-        $this->assertArrayNotHasKey('filter', $baseSettings['analysis']);
+        $this->assertArrayNotHasKey('sac_stemmer', $baseSettings['analysis']['filter'] ?? []);
     }
 
     public function testCollectMissingSlotWarningsCollectsOneMessagePerAffectedField(): void
@@ -184,31 +282,18 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        // sac_stopwords is present but unrelated to either active field here -- just
+                        // enough to keep this analyzer auto-discovered as a target while genuinely lacking
+                        // both sac_stemmer and sac_synonyms.
+                        'filter' => ['lowercase', 'sac_stopwords'],
                     ],
                 ],
             ],
         ];
 
-        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertCount(2, $warnings);
-    }
-
-    /**
-     * Same "analyzer absent from settings entirely" case as testAnalyzerNameNotPresentInBaseSettingsThrowsWhenAFieldIsActive(),
-     * but via collectMissingSlotWarnings() -- still surfaced (as a warning, not a throw) so a caller using
-     * only the warnings method still learns about a real typo/config bug, not just per-slot opt-outs.
-     */
-    public function testCollectMissingSlotWarningsAlsoReportsAnAnalyzerAbsentFromSettingsEntirely(): void
-    {
-        $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
-            ->setStemmerLanguage('light_german');
-
-        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, [], ['nonexistent_analyzer']);
-
-        $this->assertCount(1, $warnings);
-        $this->assertStringContainsString('nonexistent_analyzer', $warnings[0]);
     }
 
     public function testInactiveFieldWithNoReferencedSlotDoesNotThrowAndWritesNothing(): void
@@ -218,15 +303,19 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings);
 
-        $this->assertSame([], $result['analysis']['filter'] ?? []);
+        $this->assertSame(
+            ['type' => 'synonym', 'synonyms' => []],
+            $result['analysis']['filter']['sac_synonyms'],
+        );
+        $this->assertArrayNotHasKey('sac_stemmer', $result['analysis']['filter']);
     }
 
     public function testSynonymsAreWrittenIntoAnAlreadyReferencedSynonymSlot(): void
@@ -234,7 +323,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setSynonyms(new ArrayObject([$this->term('stuhl => stuhl, sessel'), $this->term('leuchte => leuchte, lampe')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'synonym', 'synonyms' => ['stuhl => stuhl, sessel', 'leuchte => leuchte, lampe']],
@@ -247,7 +336,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
         $baseSettings['analysis']['filter']['sac_synonyms'] = ['type' => 'synonym', 'synonyms' => ['stale => data']];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings);
 
         $this->assertSame(
             ['type' => 'synonym', 'synonyms' => []],
@@ -262,7 +351,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ->setStopwordsBuiltinLanguage('_german_')
             ->setStopwords(new ArrayObject([$this->term('ignored')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'stop', 'stopwords' => '_german_'],
@@ -276,7 +365,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ->setStopwordsMode(SearchAnalyzerConfigConfig::STOPWORDS_MODE_CUSTOM)
             ->setStopwords(new ArrayObject([$this->term('und'), $this->term('oder')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'stop', 'stopwords' => ['und', 'oder']],
@@ -294,13 +383,13 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertArrayNotHasKey('sac_stopwords', $result['analysis']['filter'] ?? []);
     }
@@ -311,7 +400,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ->setDecompoundEnabled(true)
             ->setDecompoundWords(new ArrayObject([$this->term('brenn'), $this->term('stuhl')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'dictionary_decompounder', 'word_list' => ['brenn', 'stuhl']],
@@ -329,7 +418,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ->setDecompoundWords(new ArrayObject([$this->term('brenn')]))
             ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl'), $this->term('Contorion')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $script = $result['analysis']['filter']['sac_decompound']['script']['source'];
         $this->assertStringContainsString('"brennenstuhl"', $script);
@@ -342,7 +431,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
         $baseSettings['analysis']['filter']['sac_decompound_words'] = ['type' => 'dictionary_decompounder', 'word_list' => ['stale']];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings);
 
         $this->assertSame(
             ['type' => 'dictionary_decompounder', 'word_list' => []],
@@ -366,7 +455,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                     'fulltext_index_analyzer' => [
                         'tokenizer' => 'standard',
@@ -376,11 +465,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(
-            $searchAnalyzerConfigTransfer,
-            $baseSettings,
-            ['fulltext_search_analyzer', 'fulltext_index_analyzer'],
-        );
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertArrayHasKey('sac_decompound', $result['analysis']['filter']);
     }
@@ -396,16 +481,16 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
         $this->assertArrayNotHasKey('sac_decompound', $result['analysis']['filter'] ?? []);
 
-        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $warnings = (new SearchAnalyzerConfigRenderer())->collectMissingSlotWarnings($searchAnalyzerConfigTransfer, $baseSettings);
         $this->assertCount(1, $warnings);
         $this->assertStringContainsString('sac_decompound', $warnings[0]);
     }
@@ -416,7 +501,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
             ->setStemmerLanguage('light_german')
             ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl')]));
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'keyword_marker', 'keywords' => ['Brennenstuhl']],
@@ -434,13 +519,13 @@ class SearchAnalyzerConfigRendererTest extends Unit
                 'analyzer' => [
                     'fulltext_search_analyzer' => [
                         'tokenizer' => 'standard',
-                        'filter' => ['lowercase'],
+                        'filter' => ['lowercase', 'sac_synonyms'],
                     ],
                 ],
             ],
         ];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, $baseSettings);
 
         $this->assertArrayNotHasKey('sac_keyword_marker', $result['analysis']['filter'] ?? []);
     }
@@ -450,7 +535,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $baseSettings = static::FULLY_SLOTTED_BASE_SETTINGS;
         $baseSettings['analysis']['filter']['sac_normalization'] = ['type' => 'german_normalization'];
 
-        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render(new SearchAnalyzerConfigTransfer(), $baseSettings);
 
         $this->assertSame(
             ['type' => 'german_normalization'],
@@ -463,7 +548,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setNormalizationFilter('arabic_normalization');
 
-        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $this->assertSame(
             ['type' => 'arabic_normalization'],
@@ -485,7 +570,7 @@ class SearchAnalyzerConfigRendererTest extends Unit
 
         $this->expectException(SearchAnalyzerConfigInvalidTermException::class);
 
-        (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS, ['fulltext_search_analyzer']);
+        (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
     }
 
     /**
