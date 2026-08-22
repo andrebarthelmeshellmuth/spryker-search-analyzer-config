@@ -20,8 +20,8 @@ use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\NotBlank;
 
 /**
- * The five independently-editable SCALAR fields (see [[search_analyzer_config_plan]]'s locked-in "five
- * independent fields, not a single Language selector" decision), plus FIELD_LIST_TEXT for the ONE term
+ * The five independently-editable SCALAR fields (a deliberate design decision: five independent fields,
+ * not a single combined Language selector), plus FIELD_LIST_TEXT for the ONE term
  * list that belongs to whichever scalar filter this form instance is built for (stopwords/decompound only
  * -- synonyms and do-not-decompound have no scalar counterpart at all, so they stay on
  * SearchAnalyzerConfigEditListForm's own dedicated screen instead).

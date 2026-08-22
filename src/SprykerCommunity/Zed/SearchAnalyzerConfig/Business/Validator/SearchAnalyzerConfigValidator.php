@@ -16,7 +16,7 @@ use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchAnalyzerConfigConfig;
 /**
  * Every term destined for the do-not-decompound list ends up inlined as a Painless list literal in a
  * `condition` filter's `script.source` -- the `analysis` script context does not support `script.params`
- * (verified live, see [[search_analyzer_config_plan]]). That makes this validator a security boundary
+ * (verified live against a real cluster). That makes this validator a security boundary
  * (preventing script injection via a persisted term), not just input hygiene, which is why it rejects
  * anything outside SearchAnalyzerConfigConfig::TERM_PATTERN for that one list type rather than merely
  * escaping it.
