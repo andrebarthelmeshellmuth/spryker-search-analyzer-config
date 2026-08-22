@@ -15,10 +15,11 @@ use Spryker\Zed\SearchElasticsearch\SearchElasticsearchConfig;
 
 /**
  * Same Zed-native connection path as `spryker-community/search-index-alias`'s own
- * `ElasticaClientProvider` (copied rather than shared -- see [[spryker_standalone_community_packages]]):
+ * `ElasticaClientProvider` (copied rather than shared: this package and search-index-alias must each
+ * stay independently installable, so no cross-package code dependency):
  * `Spryker\Shared\SearchElasticsearch\ElasticaClient\ElasticaClientFactory` is explicitly a Shared-layer
  * class meant for reuse, distinct from the Client-layer `Client\Search`/`Client\Catalog` facades that
- * crash when called from Zed/console for lack of an HTTP session (see [[spryker_es_call_from_zed_gotcha]]).
+ * crash when called from Zed/console for lack of an HTTP session.
  * `SearchAnalyzerConfigPreviewer` uses this to run `_analyze` against both the live alias (read-only) and
  * a throwaway index (created and torn down within the same request).
  */

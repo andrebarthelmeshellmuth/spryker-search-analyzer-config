@@ -158,8 +158,8 @@ interface SearchAnalyzerConfigFacadeInterface
     public function getManagedScopes(): array;
 
     /**
-     * The explicit "Apply" action (see [[search_analyzer_config_plan]]'s locked-in two-step Apply UX --
-     * Save only stages, this is the SEPARATE action that triggers a real search-index-alias rebuild).
+     * The explicit "Apply" action (this package's two-step UX: Save only stages, this is the SEPARATE
+     * action that triggers a real search-index-alias rebuild).
      * Delegates to `SearchIndexAliasFacadeInterface::requestRebuildAsync()`; the rebuild worker picks it
      * up from there, same as any other search-index-alias-triggered rebuild. The returned transfer can
      * carry a FAILED status (e.g. the scope has no live index yet and needs adoption, not a rebuild, for

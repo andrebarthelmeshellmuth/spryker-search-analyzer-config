@@ -26,8 +26,8 @@ use SprykerCommunity\Zed\SearchAnalyzerConfig\Persistence\SearchAnalyzerConfigRe
 use Throwable;
 
 /**
- * Answers "what would this staged, not-yet-applied config actually do to a real search string" -- see
- * [[search_analyzer_config_plan]]'s P6 and its own verified-live constraint: OpenSearch/Elasticsearch's
+ * Answers "what would this staged, not-yet-applied config actually do to a real search string" -- built
+ * around a verified-live constraint: OpenSearch/Elasticsearch's
  * `_analyze` endpoint rejects nested inline filter objects in a `condition` filter's own `filter` array --
  * it only accepts references to NAMED filters already defined in a real index's `analysis` block. A
  * candidate settings fragment that exists only in this package's own DB therefore cannot be previewed
@@ -40,7 +40,8 @@ use Throwable;
  *
  * Stage mapping mirrors `spryker-community/search-debug`'s own `AnalysisStageMapper` (same `explain: true`
  * response shape: `charfilters`/`tokenizer`/`tokenfilters`, or a single `analyzer` fallback for a built-in,
- * non-custom analyzer) -- copied rather than shared per [[spryker_standalone_community_packages]], and
+ * non-custom analyzer) -- copied rather than shared: this package and search-debug must each stay
+ * independently installable, and
  * deliberately simplified to token strings only (no offsets/component-definition lookups), since this
  * page's job is a before/after diff, not a full analysis tree.
  */

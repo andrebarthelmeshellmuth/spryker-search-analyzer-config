@@ -149,7 +149,7 @@ class SearchAnalyzerConfigConfig extends AbstractSharedConfig
      *
      * A conservative allow-list for a brand/do-not-decompound term that will be inlined as a Painless
      * list literal in a `condition` token filter's `script.source` (the `analysis` script context does
-     * not support `script.params`, verified live — see [[search_analyzer_config_plan]]). Every persisted
+     * not support `script.params`, verified live against a real cluster). Every persisted
      * term is validated against this pattern before it can ever reach script source, not just at render
      * time — string-into-script-source is a security boundary, not a nicety.
      */
