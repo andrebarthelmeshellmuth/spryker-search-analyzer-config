@@ -91,11 +91,8 @@ class SearchAnalyzerConfigTargetIndexSettingsExpanderPluginTest extends Unit
 
         // The project's own schema must already declare and chain the well-known 'sac_stemmer' slot --
         // this package only ever overwrites the DATA inside it, see SearchAnalyzerConfigRenderer's own
-        // class doc block. Mirrors this demo shop's real de_page/at_page.json schema, which declares BOTH
-        // analyzers this shop's own Pyz\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig targets below
-        // — leaving one out here would make SearchAnalyzerConfigRenderer throw
-        // SearchAnalyzerConfigMissingFilterSlotException (an active stemmerLanguage with no analyzer to
-        // write it into at all).
+        // class doc block. Mirrors this demo shop's real de_page/at_page.json schema, which declares it on
+        // BOTH analyzers below.
         $baseSettings = [
             'analysis' => [
                 'analyzer' => [
@@ -111,11 +108,9 @@ class SearchAnalyzerConfigTargetIndexSettingsExpanderPluginTest extends Unit
 
         $result = (new SearchAnalyzerConfigTargetIndexSettingsExpanderPlugin())->expand($searchIndexScopeTransfer, $baseSettings);
 
-        // Which analyzer(s) get spliced into is decided by SearchAnalyzerConfigConfig::getTargetAnalyzerNames()
-        // — the out-of-the-box package default is empty (see that class's own docblock), but this demo
-        // shop's own Pyz\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig override targets BOTH
-        // 'fulltext_index_analyzer' and 'fulltext_search_analyzer', so a real rebuild through this shop's
-        // Locator writes into both. The filter chain itself is never touched — only the data inside the
+        // Which analyzer(s) get spliced into is auto-discovered directly from $baseSettings -- both
+        // analyzers here already reference 'sac_stemmer' in their own chain, so both are targets, no
+        // project config needed. The filter chain itself is never touched — only the data inside the
         // already-referenced slot.
         $this->assertSame(
             ['lowercase', 'sac_stemmer'],

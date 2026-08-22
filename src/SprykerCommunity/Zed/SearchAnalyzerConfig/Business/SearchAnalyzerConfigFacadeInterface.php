@@ -25,12 +25,14 @@ interface SearchAnalyzerConfigFacadeInterface
 
     /**
      * Validates term-pattern safety first (see SearchAnalyzerConfigValidator), then probes the live
-     * cluster to confirm every field with an active value actually has its well-known filter slot
-     * (`sac_synonyms`, `sac_stemmer`, ...) referenced by the project's configured target analyzer(s) --
-     * this package never adds that slot itself, see SearchAnalyzerConfigRenderer's own class doc block
-     * and the README's "How it works" (see SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()).
-     * Catching this here means a missing slot, or any other combination OpenSearch itself would reject,
-     * fails loudly on Save, not silently until the next Apply/rebuild.
+     * cluster to confirm the resulting settings are actually legal (see
+     * SearchAnalyzerConfigPreviewer::validateAgainstLiveCluster()) -- an unrecognized value, or a
+     * chain-order mistake OpenSearch itself rejects, fails loudly on Save, not silently until the next
+     * Apply/rebuild. Does NOT block on a field with an active value whose well-known filter slot
+     * (`sac_synonyms`, `sac_stemmer`, ...) simply isn't referenced by one of the project's target
+     * analyzer(s) -- that's a deliberate per-analyzer opt-out, not an error (see
+     * SearchAnalyzerConfigRenderer's own class doc block); call {@see collectMissingSlotWarnings()}
+     * first if the caller wants to warn about that and let the user confirm past it.
      *
      * @api
      *
@@ -159,7 +161,10 @@ interface SearchAnalyzerConfigFacadeInterface
      * The explicit "Apply" action (see [[search_analyzer_config_plan]]'s locked-in two-step Apply UX --
      * Save only stages, this is the SEPARATE action that triggers a real search-index-alias rebuild).
      * Delegates to `SearchIndexAliasFacadeInterface::requestRebuildAsync()`; the rebuild worker picks it
-     * up from there, same as any other search-index-alias-triggered rebuild.
+     * up from there, same as any other search-index-alias-triggered rebuild. The returned transfer can
+     * carry a FAILED status (e.g. the scope has no live index yet and needs adoption, not a rebuild, for
+     * first-time setup) -- that is NOT recorded as applied here (there is no target index to record), the
+     * caller (the Zed Apply button) should check `getStatus()`/`getFailureReason()` and surface it.
      *
      * @api
      *
@@ -177,4 +182,87 @@ interface SearchAnalyzerConfigFacadeInterface
      * @return array<string> Names of the indices that were deleted.
      */
     public function pruneOrphanedPreviewIndices(): array;
+
+    /**
+     * Pre-save, non-fatal check for a caller (the Zed edit form) that wants to warn the user and let them
+     * confirm past it, rather than have {@see save()} silently apply a field to fewer analyzers than they
+     * might expect. Returns one message per (active field, target analyzer) combination where that
+     * analyzer's own chain doesn't reference the field's well-known slot -- a deliberate per-analyzer
+     * opt-out (see SearchAnalyzerConfigRenderer's own class doc block) is indistinguishable from a
+     * forgotten schema declaration from here, so this is advisory only and never blocks {@see save()}
+     * itself. Read-only: no cluster write, no persistence.
+     *
+     * @api
+     *
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string>
+     */
+    public function collectMissingSlotWarnings(SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer): array;
+
+    /**
+     * Pure structural read for the Zed edit form to show UP FRONT, independent of any field's current
+     * value -- unlike {@see collectMissingSlotWarnings()}, which only reports a slot missing for a field
+     * that's currently active, this reports every chain-visible slot's presence (`sac_normalization`,
+     * `sac_decompound`, `sac_synonyms`, `sac_stopwords`, `sac_keyword_marker`, `sac_stemmer`) on every
+     * target analyzer regardless, before the user has typed anything. Read-only: no cluster write, no
+     * persistence.
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string, array<string, bool>> Slot name => (analyzer name => referenced by that analyzer's own chain).
+     */
+    public function describeSlotAvailability(string $sourceIdentifier, string $storeName): array;
+
+    /**
+     * Analyzer names this package manages for this scope -- auto-discovered from the live cluster's
+     * `analysis.analyzer` map, any analyzer whose own chain references at least one of this package's
+     * well-known `sac_*` slot names. Read-only: no cluster write, no persistence. Fails open (empty array)
+     * for an unmanaged scope, a cluster hiccup, or a store/locale with no live index yet.
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string>
+     */
+    public function getManagedAnalyzerNames(string $sourceIdentifier, string $storeName): array;
+
+    /**
+     * The full snapshot of whichever revision is currently LIVE for this scope (i.e. the revision named by
+     * `SearchAnalyzerConfigTransfer::getAppliedRevision()`), for diffing against the currently staged
+     * config -- see the Zed Edit page's per-filter "edited" badges. Null when nothing has ever been applied
+     * for this scope yet (nothing live to diff against) or the scope doesn't exist.
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     */
+    public function findAppliedSnapshot(string $sourceIdentifier, string $storeName): ?SearchAnalyzerConfigTransfer;
+
+    /**
+     * Which of this package's well-known slots would actually change on the LIVE cluster if
+     * $searchAnalyzerConfigTransfer were applied right now -- diffed against real live filter bodies, NOT
+     * `applied_revision` (see SearchAnalyzerConfigPreviewer::describeEditedSlots()'s own doc block for
+     * why). Always accurate, including for a scope that's never been through Apply. Fails open (every
+     * slot false) for an unmanaged scope or a cluster hiccup.
+     *
+     * @api
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string, bool> Slot name => whether rendering $searchAnalyzerConfigTransfer would change that slot's live filter body.
+     */
+    public function describeEditedSlots(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array;
 }
