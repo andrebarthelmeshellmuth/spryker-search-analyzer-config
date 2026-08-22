@@ -15,8 +15,10 @@ use Spryker\Zed\SearchElasticsearch\SearchElasticsearchConfig;
 
 /**
  * Same Zed-native connection path as `spryker-community/search-index-alias`'s own
- * `ElasticaClientProvider` (copied rather than shared: this package and search-index-alias must each
- * stay independently installable, so no cross-package code dependency):
+ * `ElasticaClientProvider` (copied rather than shared: search-index-alias IS a hard composer dependency
+ * of this package -- see README, "Requirements" -- but its `Business\Client\ElasticaClientProvider` is
+ * an internal implementation detail, not part of its public Dependency\Facade/Plugin contract, so this
+ * package doesn't reach across the package boundary to reuse it directly):
  * `Spryker\Shared\SearchElasticsearch\ElasticaClient\ElasticaClientFactory` is explicitly a Shared-layer
  * class meant for reuse, distinct from the Client-layer `Client\Search`/`Client\Catalog` facades that
  * crash when called from Zed/console: their query-expander plugins unconditionally call
