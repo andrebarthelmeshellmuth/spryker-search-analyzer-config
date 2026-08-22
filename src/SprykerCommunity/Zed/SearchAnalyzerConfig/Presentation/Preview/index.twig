@@ -32,7 +32,7 @@
                             <div style="margin-bottom: 8px;">
                                 <strong>{{ stage.stageName }}</strong><br/>
                                 {% if stage.tokens %}
-                                    {% for token in stage.tokens %}<span class="label label-default" style="margin-right: 2px;">{{ token }}</span>{% endfor %}
+                                    {% for token in stage.tokens %}<span class="label label-warning" style="margin-right: 2px;">{{ token }}</span>{% endfor %}
                                 {% else %}
                                     <span class="text-muted">{{ '(no tokens survive this stage)' | trans }}</span>
                                 {% endif %}
