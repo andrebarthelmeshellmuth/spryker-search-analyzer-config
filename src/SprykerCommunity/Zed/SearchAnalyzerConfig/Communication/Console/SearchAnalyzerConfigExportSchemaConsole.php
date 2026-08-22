@@ -19,9 +19,10 @@ use Symfony\Component\Console\Output\OutputInterface;
 /**
  * For a GREENFIELD install only: a scope's ordinary path is DB -> search-index-alias rebuild, which
  * clones the LIVE index's settings and this package writes into slots the project's own schema already
- * declared and chained -- but a brand-new scope has no live index yet for a rebuild to clone from (see the
- * README, "The schema-JSON path is unusable for ongoing updates" -- a rebuild never re-reads a project's
- * schema JSON, only the live index's settings). For that one case, the schema JSON a project's own
+ * declared and chained -- but a brand-new scope has no live index yet for a rebuild to clone from (see
+ * the README, "Bootstrapping a brand-new scope's first index (the "greenfield" case)" -- a rebuild never
+ * re-reads a project's schema JSON, only the live index's settings). For that one case, the schema JSON
+ * a project's own
  * `search:setup` reads to CREATE the very first index is the only legitimate place this config can reach.
  * This command renders the currently-staged config into a standalone `analysis` JSON fragment for an
  * operator to merge into that project's own schema file by hand -- it never edits a project's files
