@@ -68,10 +68,12 @@ class SearchAnalyzerConfigConfig extends AbstractSharedConfig
     ];
 
     /**
-     * The two list types with NO scalar filter of their own, so no filter page to fold them into --
-     * `LIST_TYPE_DECOMPOUND_WORD`/`LIST_TYPE_STOPWORD` are edited inline on their filter's own page instead
-     * (ConfigController::editFilterAction(), SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT) and have no
-     * standalone list page anymore.
+     * `LIST_TYPE_SYNONYM`/`LIST_TYPE_DO_NOT_DECOMPOUND` -- the two list types with no scalar filter of
+     * their own to fold into, so they get their own standalone page instead
+     * (ConfigController::editListAction()). The other two list types, `LIST_TYPE_DECOMPOUND_WORD` and
+     * `LIST_TYPE_STOPWORD`, DO have a scalar filter of their own (decompoundEnabled, stopwordsMode) and
+     * are deliberately excluded from this const: they're edited inline on that filter's own page instead
+     * (ConfigController::editFilterAction(), SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT).
      *
      * @var array<string>
      */

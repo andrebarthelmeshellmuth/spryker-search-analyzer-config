@@ -103,6 +103,24 @@ class SearchAnalyzerConfigTermListMapper
     }
 
     /**
+     * The two SearchAnalyzerConfigConfig::STANDALONE_LIST_TYPES each map to their own slot -- note
+     * LIST_TYPE_DO_NOT_DECOMPOUND's slot is `sac_keyword_marker`, not a "do-not-decompound"-named filter:
+     * the underlying OpenSearch/Elasticsearch mechanism is a `keyword_marker` filter (it protects a term
+     * from a later STEMMER, independent of whether decompounding is even enabled -- see
+     * SearchAnalyzerConfigRenderer::applyKeywordMarkerSlot()'s own doc block).
+     *
+     * @param string $listType One of SearchAnalyzerConfigConfig::STANDALONE_LIST_TYPES.
+     */
+    public function resolveStandaloneListSlotName(string $listType): string
+    {
+        return match ($listType) {
+            SearchAnalyzerConfigConfig::LIST_TYPE_SYNONYM => 'sac_synonyms',
+            SearchAnalyzerConfigConfig::LIST_TYPE_DO_NOT_DECOMPOUND => 'sac_keyword_marker',
+            default => '',
+        };
+    }
+
+    /**
      * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
      * @param string|null $listType The one list type (if any) whose terms should also be included, as
      *  SearchAnalyzerConfigEditForm::FIELD_LIST_TEXT -- see ConfigController::resolveFilterListType().

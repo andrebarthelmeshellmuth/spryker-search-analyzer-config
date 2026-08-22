@@ -233,6 +233,7 @@ class ConfigController extends AbstractScopeController
             ?? (new SearchAnalyzerConfigTransfer())->setSourceIdentifier($sourceIdentifier)->setStoreName($storeName);
 
         $termListMapper = new SearchAnalyzerConfigTermListMapper();
+        $slotName = $termListMapper->resolveStandaloneListSlotName($listType);
 
         $editListForm = $this->getFactory()
             ->createSearchAnalyzerConfigEditListForm(
@@ -261,6 +262,7 @@ class ConfigController extends AbstractScopeController
                     'sourceIdentifier' => $sourceIdentifier,
                     'storeName' => $storeName,
                     'listType' => $listType,
+                    'slotName' => $slotName,
                     'editListFormView' => $editListForm->createView(),
                 ]);
             }
@@ -280,6 +282,7 @@ class ConfigController extends AbstractScopeController
             'sourceIdentifier' => $sourceIdentifier,
             'storeName' => $storeName,
             'listType' => $listType,
+            'slotName' => $slotName,
             'editListFormView' => $editListForm->createView(),
         ]);
     }
