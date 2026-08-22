@@ -19,7 +19,10 @@ use Spryker\Zed\SearchElasticsearch\SearchElasticsearchConfig;
  * stay independently installable, so no cross-package code dependency):
  * `Spryker\Shared\SearchElasticsearch\ElasticaClient\ElasticaClientFactory` is explicitly a Shared-layer
  * class meant for reuse, distinct from the Client-layer `Client\Search`/`Client\Catalog` facades that
- * crash when called from Zed/console for lack of an HTTP session.
+ * crash when called from Zed/console: their query-expander plugins unconditionally call
+ * `Client\Store::getCurrentStore()`/`Client\Locale::getCurrentLocale()`, which have no current
+ * Store/Locale context to resolve outside a live Yves/Glue request (not literally "no HTTP session" --
+ * a Zed controller request has one and still crashes the same way).
  * `SearchAnalyzerConfigPreviewer` uses this to run `_analyze` against both the live alias (read-only) and
  * a throwaway index (created and torn down within the same request).
  */
