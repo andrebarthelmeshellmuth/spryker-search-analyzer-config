@@ -75,7 +75,7 @@ interface SearchAnalyzerConfigFacadeInterface
     /**
      * Merges $sourceIdentifier/$storeName's staged config into $baseSettings -- the exact call
      * `SearchAnalyzerConfigTargetIndexSettingsExpanderPlugin` makes, exposed on the facade so it's also
-     * usable from the preview/diff page (P6) against a throwaway index without going through a real
+     * usable from the preview/diff page against a throwaway index without going through a real
      * search-index-alias rebuild.
      *
      * @api
