@@ -22,7 +22,7 @@ interface SearchAnalyzerConfigPreviewerInterface
      *
      * @param string $sourceIdentifier
      * @param string $storeName
-     * @param string $targetAnalyzerName One of SearchAnalyzerConfigConfig::getTargetAnalyzerNames().
+     * @param string $targetAnalyzerName One of getManagedAnalyzerNames()'s result for this scope.
      * @param string $inputText
      *
      * @throws \SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigScopeNotManagedException
@@ -44,14 +44,14 @@ interface SearchAnalyzerConfigPreviewerInterface
     public function pruneOrphanedPreviewIndices(): array;
 
     /**
-     * Two layers: first a pure structural check (does every field with an active value have its
-     * well-known filter slot referenced by the target analyzer's own chain -- see
-     * SearchAnalyzerConfigRenderer's own class doc block for why this package never adds that slot
-     * itself), then, only if that passes and something would actually change, a real create-and-delete
-     * probe against the live cluster asking OpenSearch itself whether the resulting settings are legal
-     * (e.g. a stemmer language OpenSearch doesn't recognize). No-op (returns no errors) when the scope
-     * isn't (yet) a search-index-alias managed scope, since there's nothing live to validate against and
-     * nothing that could be applied either way.
+     * The remaining HARD gate before persisting: once something would actually change, a real
+     * create-and-delete probe against the live cluster asking OpenSearch itself whether the resulting
+     * settings are legal (e.g. a stemmer language OpenSearch doesn't recognize, or a chain-order mistake).
+     * A field with an active value whose slot simply isn't referenced by ONE target analyzer is NOT an
+     * error here -- see collectMissingSlotWarnings() for that, a non-fatal, pre-save warning the caller can
+     * let the user confirm past. No-op (returns no errors) when
+     * the scope isn't (yet) a search-index-alias managed scope, since there's nothing live to validate
+     * against and nothing that could be applied either way.
      *
      * @param string $sourceIdentifier
      * @param string $storeName
@@ -60,6 +60,73 @@ interface SearchAnalyzerConfigPreviewerInterface
      * @return array<string> Validation error messages; empty means compatible (or not checkable).
      */
     public function validateAgainstLiveCluster(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array;
+
+    /**
+     * Pre-save, non-fatal counterpart to validateAgainstLiveCluster() -- read-only (no probe index, no
+     * persistence), cheap enough to call on every form submit before the user has confirmed anything.
+     * Returns one message per (active field, target analyzer) combination where that analyzer's own chain
+     * doesn't reference the field's well-known slot -- a deliberate per-analyzer opt-out is
+     * indistinguishable from a forgotten schema declaration from here, so this is advisory only; the
+     * caller decides whether to block on it or let the user confirm past it. Fails open (empty warnings)
+     * for an unmanaged scope or a cluster hiccup, exactly like validateAgainstLiveCluster() does.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string>
+     */
+    public function collectMissingSlotWarnings(
+        string $sourceIdentifier,
+        string $storeName,
+        SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,
+    ): array;
+
+    /**
+     * Pure structural read for the Zed edit form to show UP FRONT, independent of any field's current
+     * value -- unlike collectMissingSlotWarnings(), which only reports a slot missing for a field that's
+     * currently active, this reports every chain-visible slot's presence on every target analyzer
+     * regardless. Fails open (empty array) for an unmanaged scope or a cluster hiccup, exactly like
+     * validateAgainstLiveCluster() does.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string, array<string, bool>> Slot name => (analyzer name => referenced by that analyzer's own chain).
+     */
+    public function describeSlotAvailability(string $sourceIdentifier, string $storeName): array;
+
+    /**
+     * Analyzer names for the Zed edit/preview forms -- see
+     * SearchAnalyzerConfigRendererInterface::resolveTargetAnalyzerNames() for the discovery rule. Fails
+     * open (empty array) for an unmanaged scope or a cluster hiccup, exactly like the other live-cluster
+     * reads on this class.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     *
+     * @return array<string>
+     */
+    public function getManagedAnalyzerNames(string $sourceIdentifier, string $storeName): array;
+
+    /**
+     * Which of this package's well-known slots would actually change on the LIVE cluster if
+     * $searchAnalyzerConfigTransfer were applied right now -- see the implementation's own doc block for
+     * why this is diffed against real live filter bodies rather than `applied_revision`. Fails open
+     * (every slot false) for an unmanaged scope or a cluster hiccup, exactly like the other live-cluster
+     * reads on this class.
+     *
+     * @param string $sourceIdentifier
+     * @param string $storeName
+     * @param \Generated\Shared\Transfer\SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer
+     *
+     * @return array<string, bool> Slot name => whether rendering $searchAnalyzerConfigTransfer would change that slot's live filter body.
+     */
+    public function describeEditedSlots(
         string $sourceIdentifier,
         string $storeName,
         SearchAnalyzerConfigTransfer $searchAnalyzerConfigTransfer,

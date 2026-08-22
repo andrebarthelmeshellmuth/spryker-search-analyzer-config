@@ -10,7 +10,6 @@ declare(strict_types = 1);
 namespace SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Controller;
 
 use Generated\Shared\Transfer\SearchAnalyzerConfigPreviewResultTransfer;
-use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigMissingFilterSlotException;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Business\Exception\SearchAnalyzerConfigScopeNotManagedException;
 use SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Form\SearchAnalyzerConfigPreviewForm;
 use Symfony\Component\Form\FormInterface;
@@ -35,13 +34,15 @@ class PreviewController extends AbstractScopeController
             return $this->viewResponse(['previewFormView' => null, 'result' => null]);
         }
 
-        if ($this->getFactory()->getConfig()->getTargetAnalyzerNames() === []) {
-            $this->addErrorMessage('No target analyzer is configured (SearchAnalyzerConfigConfig::getTargetAnalyzerNames() is empty) -- there is nothing to preview against. See README, "Configuration".');
+        $targetAnalyzerNames = $this->getFacade()->getManagedAnalyzerNames($sourceIdentifier, $storeName);
+
+        if ($targetAnalyzerNames === []) {
+            $this->addErrorMessage('No analyzer in the live index references any of this package\'s well-known filter slots yet -- there is nothing to preview against. See README, "Configuration".');
 
             return $this->viewResponse(['previewFormView' => null, 'result' => null]);
         }
 
-        $previewForm = $this->getFactory()->createSearchAnalyzerConfigPreviewForm($sourceIdentifier, $storeName)->handleRequest($request);
+        $previewForm = $this->getFactory()->createSearchAnalyzerConfigPreviewForm($sourceIdentifier, $storeName, $targetAnalyzerNames)->handleRequest($request);
         $result = null;
 
         if ($previewForm->isSubmitted() && $previewForm->isValid()) {
@@ -77,12 +78,6 @@ class PreviewController extends AbstractScopeController
             return $this->getFacade()->preview($sourceIdentifier, $storeName, $targetAnalyzerName, $inputText);
         } catch (SearchAnalyzerConfigScopeNotManagedException $searchAnalyzerConfigScopeNotManagedException) {
             $this->addErrorMessage($searchAnalyzerConfigScopeNotManagedException->getMessage());
-
-            return null;
-        } catch (SearchAnalyzerConfigMissingFilterSlotException $searchAnalyzerConfigMissingFilterSlotException) {
-            foreach ($searchAnalyzerConfigMissingFilterSlotException->getMissingSlotMessages() as $missingSlotMessage) {
-                $this->addErrorMessage($missingSlotMessage);
-            }
 
             return null;
         } catch (Throwable $throwable) {

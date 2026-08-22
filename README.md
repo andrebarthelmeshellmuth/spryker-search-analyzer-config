@@ -1,6 +1,11 @@
 <!-- markdownlint-disable -->
 # Search Analyzer Config
 
+[![CI](https://github.com/andrebarthelmeshellmuth/spryker-search-analyzer-config/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/andrebarthelmeshellmuth/spryker-search-analyzer-config/actions/workflows/ci.yml)
+[![PHP](https://img.shields.io/badge/php-%E2%89%A5%208.3-777bb4)](composer.json)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%208-2a6b2a)](phpstan.neon)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 ## Contents
 
 - [What does this do?](#what-does-this-do)
@@ -10,6 +15,7 @@
 - [The Zed GUI](#the-zed-gui)
 - [Configuration](#configuration)
 - [How it works](#how-it-works)
+  - [Per-analyzer opt-out: not every target analyzer needs every slot](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot)
   - [Filter chain order is your project's responsibility — and why it matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)
 - [Data model](#data-model)
 - [Managing config without a GUI](#managing-config-without-a-gui)
@@ -133,31 +139,19 @@ No back-office ACL setup is needed beyond that — Spryker's own Acl module gate
 like every other Zed module; an unrestricted (root-style) role reaches it immediately, and a restricted
 role needs an explicit rule the same way it would for any other module.
 
-### 7. Point at your project's real target analyzer(s)
+### 7. Declare this package's filter slots in your project's own schema JSON
 
-Out of the box `getTargetAnalyzerNames()` returns an empty array, so a fresh install renders no-op
-settings — nothing breaks, nothing applies either. Override it in your project's own
-`Pyz\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig`:
-
-```php
-class SearchAnalyzerConfigConfig extends \SprykerCommunity\Zed\SearchAnalyzerConfig\SearchAnalyzerConfigConfig
-{
-    public function getTargetAnalyzerNames(): array
-    {
-        return ['fulltext_search_analyzer'];
-    }
-}
-```
-
-See [Configuration](#configuration) for the rest of the override points.
-
-### 8. Declare this package's filter slots in your project's own schema JSON
+There is nothing to configure to point this package at your analyzer(s) — which analyzers it manages is
+auto-discovered directly from the live cluster: any analyzer whose own `filter` chain references at least
+one of this package's well-known slot names is, by definition, a target (nobody names a filter
+`sac_stemmer` by accident). A fresh install with no such reference anywhere renders no-op settings —
+nothing breaks, nothing applies either.
 
 This package **never** adds a filter to an analyzer, and never reorders one — that is your project
-schema's job, not something a rebuild can do for you. For each analyzer named in
-`getTargetAnalyzerNames()`, declare whichever of these named filters you intend to use under
-`analysis.filter`, and reference them from that analyzer's own `filter` array, in the right position (see
-[why order matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)):
+schema's job, not something a rebuild can do for you. For each analyzer you want managed, declare
+whichever of these named filters you intend to use under `analysis.filter`, and reference them from that
+analyzer's own `filter` array, in the right position (see [why order
+matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)):
 
 - `sac_normalization`, `sac_synonyms`, `sac_stopwords`, `sac_keyword_marker`, `sac_stemmer` — plain filter
   bodies; this package only ever overwrites their contents.
@@ -168,11 +162,11 @@ schema's job, not something a rebuild can do for you. For each analyzer named in
 `search-analyzer-config:export-schema` renders your currently-staged config as a ready-to-paste `analysis`
 JSON fragment, pre-populated with a starting chain in
 `SearchAnalyzerConfigRenderer::CHAIN_VISIBLE_SLOT_NAMES_IN_RECOMMENDED_ORDER` — the fastest way to get a
-correctly-ordered starting point instead of hand-writing one. A field left active with no corresponding
-slot declared fails loudly (`SearchAnalyzerConfigMissingFilterSlotException`) the next time it's rendered,
-naming the missing slot and the analyzer — never silently skipped.
+correctly-ordered starting point instead of hand-writing one. A field left active whose slot isn't
+referenced by any analyzer is simply skipped when rendered (see [Per-analyzer
+opt-out](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot)) — never a hard failure.
 
-### 9. Verify the installation
+### 8. Verify the installation
 
 ```
 vendor/bin/console search-analyzer-config:check-installation
@@ -194,14 +188,30 @@ Under **Search Toolbox → Search Analyzer Config** in the back office:
   other action: Edit,
   Copy to another scope, Preview, History, and Apply (the explicit rebuild trigger — see [How it
   works](#how-it-works)'s two-step Apply design).
+  *(Screenshots below are pending recapture against the current matrix-based Edit UI — see
+  [Per-analyzer opt-out](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot); the Overview
+  page's core purpose hasn't changed, but its exact layout has since this screenshot was taken.)*
 
   ![The Overview page for the "page" source / DE store scope: revision 10, not yet applied, and every staged field — stemmer language, decompound word list, synonyms, and the do-not-decompound/brand list](docs/screenshots/overview-page.png)
 
-- **Edit** — the five fields plus the four term lists (one term per line). Saving only stages the config;
-  it never touches a live index.
-
-  ![The Edit page: stemmer language and normalization filter dropdowns, stopwords mode, the decompounding toggle and word list, the do-not-decompound/brand list, and Solr-style synonym rules](docs/screenshots/edit-page.png)
-
+- **Edit** — the five SCALAR fields (stemmer language, normalization filter, stopwords mode, its built-in
+  language, decompounding on/off), each shared by every analyzer that references its slot (same
+  index-level `analysis.filter` data, like editing a shared setting/mapping). A matrix at the top of the
+  page (rows = the six well-known filter slots, columns = every analyzer the live cluster shows
+  referencing at least one of them) makes that sharing explicit — each ✓ cell links straight to the one
+  field below it, and each field states which analyzers it currently applies to; see [Per-analyzer
+  opt-out](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot). Saving only stages the config;
+  it never touches a live index. If an active field's slot isn't referenced by one of the target analyzers,
+  Save shows a one-time warning banner instead of saving immediately; "Save anyway" confirms and saves
+  as-is.
+- **Edit list** (reached from a "N terms staged — Edit store/locale specific list" link under each of the
+  four list-shaped fields on the Edit page: synonyms, decompound words, custom stopwords, do-not-decompound)
+  — a dedicated one-textarea screen per list, saving into the same scope/revision as Edit. Deliberately
+  separate from the Edit page: a term list belongs to the whole store/locale scope, not to whichever
+  analyzer happens to be selected there, so embedding it inline on a page framed per-analyzer would
+  misleadingly suggest otherwise. Saving a list here always saves directly (no warning-gate/confirm step —
+  that lives only on the main Edit page, since the Edit page's per-analyzer badges already give the
+  necessary visibility before you get here).
 - **Copy** — a confirm screen naming the target scope before overwriting it; see
   [`SearchAnalyzerConfigCopier`](#data-model)'s hard-override semantics.
 - **Preview** — pick a target analyzer and enter a sample search string; see a stage-by-stage token
@@ -224,7 +234,6 @@ Override these in your project's own `Pyz\Zed\SearchAnalyzerConfig\SearchAnalyze
 
 | Method | Default | Purpose |
 | --- | --- | --- |
-| `getTargetAnalyzerNames()` | `[]` | Which named analyzer(s) in a rebuild target's live `settings.index.analysis.analyzer.*` this package writes staged data into. Each analyzer must already reference this package's filter slots — see [Installation step 8](#8-declare-this-packages-filter-slots-in-your-projects-own-schema-json). |
 | `getAllowedStemmerLanguages()` | `light_german`, `minimal_english`, `light_french` | Stemmer `language` filter values a project may pick from. A fixed allow-list, not freeform — every entry is verified to exist in your OpenSearch/Elasticsearch version. Extend it if your project verifies another language works. |
 | `getAllowedNormalizationFilters()` | `german_normalization` | Same allow-list pattern, for normalization filters. |
 | `getAllowedBuiltinStopwordsLanguages()` | German, English, French | Built-in Lucene stopword set identifiers selectable when `stopwordsMode = builtin`. |
@@ -237,12 +246,13 @@ to `SearchAnalyzerConfigFacade::renderIntoSettings()` → `SearchAnalyzerConfigR
 
 1. Looks up the scope's staged `SearchAnalyzerConfigTransfer` — a scope with no staged config returns
    `$settings` completely unchanged, per the plugin interface's own contract.
-2. For each analyzer named in `getTargetAnalyzerNames()`, checks whether that analyzer's own `filter`
-   array already references each of this package's slot names (`sac_normalization`, `sac_synonyms`,
-   `sac_stopwords`, `sac_keyword_marker`, `sac_stemmer`, `sac_decompound`). **It never adds a name to that
+2. Auto-discovers which analyzers in `$settings` to manage: any analyzer whose own `filter` array already
+   references at least one of this package's slot names (`sac_normalization`, `sac_synonyms`,
+   `sac_stopwords`, `sac_keyword_marker`, `sac_stemmer`, `sac_decompound`) is a target — see
+   `SearchAnalyzerConfigRendererInterface::resolveTargetAnalyzerNames()`. **It never adds a name to that
    array, and never changes its order** — whether a slot exists, and where it sits relative to every other
    filter on that analyzer, is entirely your project schema's decision (see [Installation step
-   8](#8-declare-this-packages-filter-slots-in-your-projects-own-schema-json) and [why order
+   7](#7-declare-this-packages-filter-slots-in-your-projects-own-schema-json) and [why order
    matters](#filter-chain-order-is-your-projects-responsibility-and-why-it-matters)).
 3. For each slot that IS referenced, overwrites its full body under `analysis.filter` with fresh data —
    `word_list` for the decompounder, `synonyms` for the synonym filter, `stopwords`/`language` for
@@ -252,16 +262,46 @@ to `SearchAnalyzerConfigFacade::renderIntoSettings()` → `SearchAnalyzerConfigR
    "synonyms": []}` and friends are valid, inert filter bodies — so a scope that had a value and had it
    cleared doesn't leave stale data behind.
 4. For a field with an ACTIVE value (e.g. a non-empty synonym list) whose slot is **not** referenced by
-   the target analyzer, throws `SearchAnalyzerConfigMissingFilterSlotException` naming the missing slot
-   and the analyzer, rather than silently inventing a filter or silently skipping the field. This is a
-   deliberate design choice over the package's earlier (pre-v1) approach, which used to insert/reorder
-   filters on the project's behalf — see [Limitations](#limitations) for why that was dropped.
+   ONE of several target analyzers, that field is simply skipped for that analyzer — a deliberate
+   per-analyzer opt-out, not an error. This is what lets a project wire decompounding/synonyms/etc. into
+   SOME of its target analyzers (e.g. an index-time analyzer) and leave them out of others (e.g. a
+   search-time one), using the exact same staged list either way — see [Per-analyzer opt-out: not every
+   target analyzer needs every slot](#per-analyzer-opt-out-not-every-target-analyzer-needs-every-slot).
 
 `sac_decompound` is always a `condition` filter wrapping a second, non-chain-visible inner filter,
 `sac_decompound_words` — never referenced from an analyzer's own `filter` array directly, only from
 `sac_decompound`'s own `filter` key, so it needs no chain position of its own. An empty do-not-decompound
 list degrades the condition script to "always true" (i.e. behaves identically to an unconditional
 decompounder), so there's no separate "plain vs. condition-wrapped" filter identity to choose between.
+
+### Per-analyzer opt-out: not every target analyzer needs every slot
+
+When more than one analyzer is auto-discovered as a target (e.g. this shop's own
+`fulltext_index_analyzer` and `fulltext_search_analyzer`), they don't all have to reference the same
+slots. Declaring `sac_decompound` in one analyzer's chain and leaving it out of another's is a legitimate,
+deliberate choice — that analyzer just doesn't get decompounding, using the exact same staged word list
+the other analyzer gets (the slot's body is shared, index-level `analysis.filter` data; only whether an
+analyzer *references* the name differs). This applies uniformly to all six slots (`sac_normalization`,
+`sac_decompound`, `sac_synonyms`, `sac_stopwords`, `sac_keyword_marker`, `sac_stemmer`), not just
+decompound.
+
+Because "this analyzer intentionally doesn't reference the slot" and "someone forgot to declare it" look
+identical from this package's side, the Zed Edit page surfaces it two ways:
+
+- **Up front, as a matrix** — `SearchAnalyzerConfigFacade::describeSlotAvailability()` is a pure structural
+  read (independent of any field's current value) that the Edit page renders as a slot × analyzer grid at
+  the top of the page: a ✓ plus an "Edit" link in every cell where that analyzer's own chain references
+  the slot, a blank cell where it doesn't. Every field below still applies to the whole scope regardless of
+  which column you clicked through from — editing it changes it for every analyzer whose column shows a
+  checkmark, same as editing a shared setting/mapping.
+- **Before saving, on the main Edit page only** — submitting it runs a read-only check
+  (`SearchAnalyzerConfigFacade::collectMissingSlotWarnings()`) and, if any active field's slot isn't
+  referenced by one of the target analyzers, shows a one-time warning banner listing exactly which
+  field/analyzer combinations are affected, instead of saving immediately. Reviewing it and clicking
+  **"Save anyway"** confirms and saves as-is; nothing is persisted until then. This warning is advisory
+  only and never reappears once confirmed for that submit — it is NOT recorded into the scope's revision
+  history. An Edit-list screen saves directly without this gate, since the Edit page's badges already give
+  that visibility before you ever get there.
 
 ### Filter chain order is your project's responsibility — and why it matters
 

@@ -66,9 +66,10 @@
         Append-only audit/restore trail: every save (manual edit, DE->AT copy, or a restore itself)
         writes one new row here holding a full JSON snapshot of spy_search_analyzer_config's own columns
         plus its full term list at that point, so "restore to revision N" is a single row read, not a
-        reconstruction. Deliberately no FK to search-index-alias's spy_search_index_rollout (see
-        [[spryker_standalone_community_packages]]); applied_index_name/applied_at on the parent row are
-        enough to correlate manually if needed.
+        reconstruction. Deliberately no FK to search-index-alias's spy_search_index_rollout: this package
+        and search-index-alias must each stay independently installable, so no cross-package schema
+        dependency; applied_index_name/applied_at on the parent row are enough to correlate manually if
+        needed.
     -->
     <table name="spy_search_analyzer_config_revision" idMethod="native" identifierQuoting="true">
         <column name="id_search_analyzer_config_revision" type="INTEGER" required="true" autoIncrement="true" primaryKey="true"/>

@@ -11,6 +11,7 @@ namespace SprykerCommunity\Zed\SearchAnalyzerConfig\Communication\Controller;
 
 use Generated\Shared\Transfer\SearchIndexScopeTransfer;
 use SprykerCommunity\Shared\SearchAnalyzerConfig\SearchIndexManagedScopeMatcher;
+use SprykerCommunity\Shared\SearchIndexAlias\SearchIndexAliasConfig;
 use SprykerCommunity\Zed\SearchIndexAlias\Persistence\Exception\ConcurrentRolloutException;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -102,6 +103,15 @@ class IndexController extends AbstractScopeController
 
         if ($searchIndexRolloutTransfer === null) {
             $this->addErrorMessage(sprintf('"%s" / "%s" is not a search-index-alias managed scope.', $sourceIdentifier, $storeName));
+
+            return $this->redirectResponse($redirectUrl);
+        }
+
+        if ($searchIndexRolloutTransfer->getStatus() === SearchIndexAliasConfig::STATUS_FAILED) {
+            $this->addErrorMessage(sprintf(
+                'Rebuild request failed: %s',
+                $searchIndexRolloutTransfer->getFailureReason() ?? 'unknown reason.',
+            ));
 
             return $this->redirectResponse($redirectUrl);
         }
