@@ -17,7 +17,7 @@
     "require": {
         "php": ">=8.3",
         "ruflin/elastica": "^7.3.0",
-        "spryker-community/search-index-alias": "^1.0.0",
+        "spryker-community/search-index-alias": "^2.0.0",
         "spryker/acl": "^3.27.0",
         "spryker/gui": "^3.30.0 || ^5.0.0",
         "spryker/kernel": "^3.86.0",
