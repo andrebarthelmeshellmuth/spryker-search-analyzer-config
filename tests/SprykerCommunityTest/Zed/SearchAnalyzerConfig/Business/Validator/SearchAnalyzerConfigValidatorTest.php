@@ -80,7 +80,7 @@ class SearchAnalyzerConfigValidatorTest extends Unit
     public function testDoNotDecompoundTermWithAllowedCharactersIsValid(): void
     {
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
-            ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl'), $this->term('Contorion-24.7')]));
+            ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl'), $this->term('Voltraxx-24.7')]));
 
         $errors = (new SearchAnalyzerConfigValidator())->validate($searchAnalyzerConfigTransfer);
 
