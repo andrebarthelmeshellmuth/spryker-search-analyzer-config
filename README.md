@@ -383,7 +383,7 @@ OpenSearch/Elasticsearch's `condition` token filter's `analysis` script context 
 means inlining it as a literal into the filter's `script.source`:
 
 ```
-def sacBrands = ["brennenstuhl", "contorion-24.7"]; return !sacBrands.contains(token.getTerm().toString().toLowerCase());
+def sacBrands = ["brennenstuhl", "voltraxx-24.7"]; return !sacBrands.contains(token.getTerm().toString().toLowerCase());
 ```
 
 Every term reaching that point has already passed `SearchAnalyzerConfigValidator`, which rejects anything

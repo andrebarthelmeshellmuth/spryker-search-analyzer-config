@@ -416,13 +416,13 @@ class SearchAnalyzerConfigRendererTest extends Unit
         $searchAnalyzerConfigTransfer = (new SearchAnalyzerConfigTransfer())
             ->setDecompoundEnabled(true)
             ->setDecompoundWords(new ArrayObject([$this->term('brenn')]))
-            ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl'), $this->term('Contorion')]));
+            ->setDoNotDecompoundTerms(new ArrayObject([$this->term('Brennenstuhl'), $this->term('Voltraxx')]));
 
         $result = (new SearchAnalyzerConfigRenderer())->render($searchAnalyzerConfigTransfer, static::FULLY_SLOTTED_BASE_SETTINGS);
 
         $script = $result['analysis']['filter']['sac_decompound']['script']['source'];
         $this->assertStringContainsString('"brennenstuhl"', $script);
-        $this->assertStringContainsString('"contorion"', $script);
+        $this->assertStringContainsString('"voltraxx"', $script);
         $this->assertStringContainsString('!sacBrands.contains(', $script);
     }
 
