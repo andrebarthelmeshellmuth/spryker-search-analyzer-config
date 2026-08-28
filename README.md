@@ -71,8 +71,8 @@ Verified on **OpenSearch 1.3.4, 2.11, 3.5.0 and Elasticsearch 8.11**. The staged
 package writes into a target index, and the live `_analyze` calls behind the config preview, use only the
 tokenizer/filter/char-filter primitives shared across both engine lineages. The OpenSearch 3.5 upgrade
 needed **no code change** in this package (verified end-to-end on a demoshop upgraded from 1.3.4); see
-[Migrating to OpenSearch 3.x](https://github.com/andrebarthelmeshellmuth/spryker-search-ranking/blob/main/docs/opensearch-3.x-migration.md)
-(in `spryker-community/search-ranking`) for the core- and project-level steps the upgrade itself involves.
+[Migrating to OpenSearch 3.x](docs/opensearch-3.x-migration.md) for why the staged `analysis` block and
+the `_analyze` preview carry across, plus the schema trap a materialize-via-rebuild can hit on 3.x.
 
 ## Installation
 
