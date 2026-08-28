@@ -41,7 +41,7 @@
         "psr/log": "^3.0.0",
         "rector/rector": "^2.0",
         "slevomat/coding-standard": "8.22.1",
-        "spryker/code-sniffer": "0.17.35",
+        "spryker/code-sniffer": "0.17.36",
         "spryker/transfer": "^3.44.0",
         "squizlabs/php_codesniffer": "3.13.6"
     },
