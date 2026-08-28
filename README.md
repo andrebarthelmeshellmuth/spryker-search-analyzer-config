@@ -65,6 +65,15 @@ script â€” see [Managing config without a GUI](#managing-config-without-a-gui) â
   `composer require` of this package (Composer will refuse to install this package without it), not an
   optional integration: this package has nothing to materialize a staged config into without it
 
+### Search engine compatibility
+
+Verified on **OpenSearch 1.3.4, 2.11, 3.5.0 and Elasticsearch 8.11**. The staged `analysis` block this
+package writes into a target index, and the live `_analyze` calls behind the config preview, use only the
+tokenizer/filter/char-filter primitives shared across both engine lineages. The OpenSearch 3.5 upgrade
+needed **no code change** in this package (verified end-to-end on a demoshop upgraded from 1.3.4); see
+[Migrating to OpenSearch 3.x](docs/opensearch-3.x-migration.md) for why the staged `analysis` block and
+the `_analyze` preview carry across, plus the schema trap a materialize-via-rebuild can hit on 3.x.
+
 ## Installation
 
 ### 1. Install the package
